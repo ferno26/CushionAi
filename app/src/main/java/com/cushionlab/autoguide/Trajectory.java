@@ -23,6 +23,13 @@ public final class Trajectory {
     public static Path trace(float sx,float sy,float dx,float dy,
                              float left,float top,float right,float bottom,
                              float radius,List<Ball> balls,int maxRebounds) {
+        return traceAdjusted(sx,sy,dx,dy,left,top,right,bottom,radius,balls,maxRebounds,0f);
+    }
+
+    /** Reflection preview with an optional per-cushion angle adjustment for visual calibration. */
+    public static Path traceAdjusted(float sx,float sy,float dx,float dy,
+                             float left,float top,float right,float bottom,
+                             float radius,List<Ball> balls,int maxRebounds,float angleAdjustmentDegrees) {
         Path result=new Path();
         float mag=(float)Math.hypot(dx,dy);
         if (mag<1.0e-5f || right<=left || bottom<=top) return result;
@@ -85,6 +92,12 @@ public final class Trajectory {
             }
             if (Math.abs(y-top)<.01f || Math.abs(y-bottom)<.01f) {
                 if(!flipY && Math.abs(dy)>1e-5f)dy=-dy;
+            }
+            if(Math.abs(angleAdjustmentDegrees)>.01f){
+                double turn=Math.toRadians(Math.max(-25f,Math.min(25f,angleAdjustmentDegrees)));
+                float nextX=(float)(dx*Math.cos(turn)-dy*Math.sin(turn));
+                float nextY=(float)(dx*Math.sin(turn)+dy*Math.cos(turn));
+                dx=nextX;dy=nextY;
             }
             result.rebounds++;
         }

@@ -45,7 +45,7 @@ public final class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(column);
         setContentView(scroll);
-        label("CUSHION LAB · AUTO GUIDE 4.2",22,0xFF7AFFB4);
+        label("CUSHION LAB · AUTO GUIDE 4.3 TEST",22,0xFF7AFFB4);
         label("Extends the game's visible white guide lines with cushion rebounds",15,Color.WHITE);
         label("No root • No internet • A separate overlay, not a modified game",13,0xFFA6B6C7);
         label("1  Allow display over other apps.\n2  Start capture and share the entire screen.\n3  Open the game in landscape and aim normally.\n4  The pale-white extensions appear from the game's guide lines.",15,0xFFE0E8EA);
@@ -78,8 +78,18 @@ public final class MainActivity extends Activity {
         seek("opacity",45,10,70,"%",false);
         label("MAXIMUM CUSHION BOUNCES",16,0xFF7AFFB4);
         seek("bounces",3,0,12,"",false);
+        label("VISUAL GUIDE TUNING",16,0xFF7AFFB4);
+        seek("guide_width",17,10,40,"%",false);
+        seek("rail_inset",100,50,160,"%",false);
+        signedSeek("cushion_bias",0,-20,20,"° per bounce");
+        signedSeek("spin_estimate",0,-10,10," visual estimate");
+        Switch debugSwitch=new Switch(this);
+        debugSwitch.setText("Show detector debug overlay");debugSwitch.setTextColor(Color.WHITE);
+        debugSwitch.setChecked(prefs.getBoolean("debug_overlay",true));
+        debugSwitch.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("debug_overlay",checked).apply());
+        column.addView(debugSwitch);
         label("WHAT IT DOES",16,0xFF7AFFB4);
-        label("It finds the largest continuous felt area, reads up to two straight white guide branches already drawn by the game, and extends each branch using equal-angle cushion reflections. It does not draw table boxes, ball circles or pocket rays.",14,Color.WHITE);
+        label("It reads up to two white guide branches and extends them. Cushion bias changes the reflected angle; Spin estimate adds a visual correction after each cushion. Debug mode shows the detected table and ray starts.",14,Color.WHITE);
         label("ACCURACY LIMITS",16,0xFFFFD78E);
         label("The extensions are geometric estimates. Spin, cushion response, moving animation frames and partially hidden guide lines can still shift the real path. When no strong white guide is visible, the app intentionally draws nothing.",13,0xFFE8C5A0);
         label("Android 15 requires a fresh screen-capture approval each session. Screenshots stay in memory on your device; this app contains no network permission or analytics.",13,0xFFA6B6C7);
@@ -113,6 +123,7 @@ public final class MainActivity extends Activity {
         });
         column.addView(bar);
     }
+    private void signedSeek(String key,int def,int min,int max,String unit){seek(key,def,min,max,unit,false);}
     private String pretty(String key){
         if(key.equals("manual_left"))return "Table left";
         if(key.equals("manual_top"))return "Table top";
@@ -122,6 +133,10 @@ public final class MainActivity extends Activity {
         if(key.equals("cue_y"))return "Cue-ball vertical position";
         if(key.equals("opacity"))return "Overlay opacity";
         if(key.equals("bounces"))return "Rebounds";
+        if(key.equals("guide_width"))return "Guide thickness";
+        if(key.equals("rail_inset"))return "Cushion contact inset";
+        if(key.equals("cushion_bias"))return "Cushion angle bias";
+        if(key.equals("spin_estimate"))return "Spin compensation";
         if(key.equals("table_width"))return "Table width";
         if(key.equals("table_height"))return "Table height";
         if(key.equals("table_shift_x"))return "Horizontal shift (100=center)";

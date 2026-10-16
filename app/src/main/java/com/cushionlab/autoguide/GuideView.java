@@ -23,16 +23,31 @@ final class GuideView extends View {
         super.onDraw(canvas);FrameAnalyzer.Scene s=scene;boolean fresh=lastFrameAt>0&&android.os.SystemClock.elapsedRealtime()-lastFrameAt<5000;
         String state=frames==0?"Waiting for screen frames":!fresh?"Capture paused":s==null||s.confidence<.30f?"Table not detected":s.rays.isEmpty()?"White guide not detected":"Extending "+s.rays.size()+" guide line(s)";
         String error=settings.getString("capture_error","");if(!error.isEmpty())state=error;publishStatus(state);
-        if(!fresh||s==null||s.confidence<.30f||s.rays.isEmpty()||frameW<1||frameH<1)return;
+        boolean debug=settings.getBoolean("debug_overlay",true);
+        if(debug)drawStatus(canvas,state+" | frames "+frames);
+        if(!fresh||s==null||s.confidence<.30f||frameW<1||frameH<1)return;
         canvas.save();canvas.scale(getWidth()/(float)frameW,getHeight()/(float)frameH);
+        float inset=Math.max(.5f,Math.min(1.6f,settings.getInt("rail_inset",100)/100f));
+        float physicsBias=settings.getInt("cushion_bias",0)+settings.getInt("spin_estimate",0)*.5f;
         int bounces=Math.max(0,Math.min(12,settings.getInt("bounces",3)));List<Trajectory.Ball> noBalls=new ArrayList<>();
+        if(debug){
+            paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(Math.max(1.2f,s.radius*.10f));paint.setColor(0xAA55FF99);
+            canvas.drawRect(s.left,s.top,s.right,s.bottom,paint);
+            for(FrameAnalyzer.GuideRay ray:s.rays){canvas.drawCircle(ray.x,ray.y,s.radius*.45f,paint);canvas.drawLine(ray.x,ray.y,ray.x+ray.dx*s.radius*3f,ray.y+ray.dy*s.radius*3f,paint);}
+        }
+        if(s.rays.isEmpty()){canvas.restore();return;}
         for(FrameAnalyzer.GuideRay ray:s.rays){
-            Trajectory.Path extension=Trajectory.trace(ray.x,ray.y,ray.dx,ray.dy,s.left+s.radius,s.top+s.radius,s.right-s.radius,s.bottom-s.radius,s.radius,noBalls,bounces);
+            Trajectory.Path extension=Trajectory.traceAdjusted(ray.x,ray.y,ray.dx,ray.dy,s.left+s.radius*inset,s.top+s.radius*inset,s.right-s.radius*inset,s.bottom-s.radius*inset,s.radius,noBalls,bounces,physicsBias);
             paint.setStyle(Paint.Style.STROKE);paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(0xD9000000);paint.setStrokeWidth(Math.max(4f,s.radius*.34f));drawPath(canvas,extension.points);
-            paint.setColor(0xFFB8F2FF);paint.setStrokeWidth(Math.max(2.1f,s.radius*.17f));drawPath(canvas,extension.points);
+            paint.setColor(0xFFB8F2FF);paint.setStrokeWidth(Math.max(1.5f,s.radius*settings.getInt("guide_width",17)/100f));drawPath(canvas,extension.points);
         }
         canvas.restore();
     }
     private void publishStatus(String text){long now=android.os.SystemClock.elapsedRealtime();if(now-lastStatusAt>=1000){lastStatusAt=now;settings.edit().putString("capture_status",text).apply();}}
+    private void drawStatus(Canvas c,String text){
+        float d=getResources().getDisplayMetrics().density;paint.setStyle(Paint.Style.FILL);paint.setTextSize(11*d);
+        paint.setColor(0xDD101820);c.drawRect(8*d,20*d,Math.min(getWidth()-8*d,16*d+paint.measureText(text)),43*d,paint);
+        paint.setColor(0xFFFFFFFF);c.drawText(text,12*d,36*d,paint);
+    }
     private void drawPath(Canvas c,List<float[]> points){if(points.size()<2)return;path.reset();path.moveTo(points.get(0)[0],points.get(0)[1]);for(int i=1;i<points.size();i++)path.lineTo(points.get(i)[0],points.get(i)[1]);c.drawPath(path,paint);}
 }

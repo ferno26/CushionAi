@@ -33,7 +33,7 @@ public final class FrameAnalyzer {
     static boolean felt(int p,float hue){float b=brightness(p);return saturation(p)>.24f&&b>.25f&&b<.94f&&hueDistance(hue(p),hue)<23f;}
     private static boolean guideWhite(int p){
         int r=(p>>16)&255,g=(p>>8)&255,b=p&255,hi=Math.max(r,Math.max(g,b)),lo=Math.min(r,Math.min(g,b));
-        return lo>=186&&hi-lo<=38&&brightness(p)>.76f;
+        return lo>=165&&hi-lo<=50&&brightness(p)>.70f;
     }
     public static Scene analyze(int[] pixels,int width,int height){
         Scene scene=new Scene();
