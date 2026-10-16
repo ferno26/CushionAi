@@ -29,7 +29,7 @@ final class GuideView extends View {
         for(FrameAnalyzer.GuideRay ray:s.rays){
             Trajectory.Path extension=Trajectory.trace(ray.x,ray.y,ray.dx,ray.dy,s.left+s.radius,s.top+s.radius,s.right-s.radius,s.bottom-s.radius,s.radius,noBalls,bounces);
             paint.setStyle(Paint.Style.STROKE);paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(0xD9000000);paint.setStrokeWidth(Math.max(4f,s.radius*.34f));drawPath(canvas,extension.points);
-            paint.setColor(0xFFE2F8FF);paint.setStrokeWidth(Math.max(2.1f,s.radius*.17f));drawPath(canvas,extension.points);
+            paint.setColor(0xFFB8F2FF);paint.setStrokeWidth(Math.max(2.1f,s.radius*.17f));drawPath(canvas,extension.points);
         }
         canvas.restore();
     }

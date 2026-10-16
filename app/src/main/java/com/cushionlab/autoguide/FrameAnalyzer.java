@@ -71,7 +71,7 @@ public final class FrameAnalyzer {
         s.confidence=Math.min(1f,ys.size()*step/(h*.42f));
     }
     private static List<Point> whitePoints(int[] p,int w,int h,Scene s){
-        List<Point> out=new ArrayList<>();int inset=Math.max(2,Math.round(s.radius*.4f)),step=(s.right-s.left>900)?2:1;
+        List<Point> out=new ArrayList<>();int inset=Math.max(2,Math.round(s.radius*.4f)),step=1;
         for(int y=(int)s.top+inset;y<(int)s.bottom-inset;y+=step)for(int x=(int)s.left+inset;x<(int)s.right-inset;x+=step)if(guideWhite(p[y*w+x]))out.add(new Point(x,y));
         return out;
     }
@@ -82,9 +82,9 @@ public final class FrameAnalyzer {
         for(int a=0;a<angles;a++){double rad=Math.toRadians(a*2);cs[a]=(float)Math.cos(rad);sn[a]=(float)Math.sin(rad);}
         int stride=Math.max(1,pts.size()/9000);
         for(int n=0;n<pts.size();n+=stride){Point q=pts.get(n);for(int a=0;a<angles;a++){int b=Math.round((-q.x*sn[a]+q.y*cs[a]+diag)/binSize);if(b>=0&&b<bins)votes[a][b]++;}}
-        int minVotes=Math.max(7,Math.round(radius*.65f/stride));List<int[]> peaks=new ArrayList<>();
+        int minVotes=Math.max(5,Math.round(radius*.45f/stride));List<int[]> peaks=new ArrayList<>();
         for(int a=0;a<angles;a++)for(int b=1;b<bins-1;b++)if(votes[a][b]>=minVotes&&votes[a][b]>=votes[a][b-1]&&votes[a][b]>=votes[a][b+1])peaks.add(new int[]{a,b,votes[a][b]});
-        peaks.sort((u,v)->Integer.compare(v[2],u[2]));int limit=Math.min(70,peaks.size());
+        peaks.sort((u,v)->Integer.compare(v[2],u[2]));int limit=Math.min(120,peaks.size());
         for(int k=0;k<limit;k++){
             int a=peaks.get(k)[0],b=peaks.get(k)[1];float rho=b*binSize-diag;List<Float> ts=new ArrayList<>();
             for(Point q:pts)if(Math.abs(-q.x*sn[a]+q.y*cs[a]-rho)<=2.5f)ts.add(q.x*cs[a]+q.y*sn[a]);
@@ -95,10 +95,10 @@ public final class FrameAnalyzer {
                 if(last-start>bestEnd-bestStart){bestStart=start;bestEnd=last;bestCount=count;}
                 if(i<ts.size()){start=last=ts.get(i);count=1;}
             }
-            float len=bestEnd-bestStart;if(len<Math.max(18f,radius*1.55f)||bestCount<Math.max(6,len*.10f))continue;
+            float len=bestEnd-bestStart;if(len<Math.max(12f,radius)||bestCount<Math.max(5,len*.08f))continue;
             Line line=new Line();line.angle=a*2;line.x1=cs[a]*bestStart-sn[a]*rho;line.y1=sn[a]*bestStart+cs[a]*rho;line.x2=cs[a]*bestEnd-sn[a]*rho;line.y2=sn[a]*bestEnd+cs[a]*rho;line.length=len;line.score=len+bestCount*1.5f;
             boolean duplicate=false;for(Line old:found){float da=Math.abs(old.angle-line.angle);da=Math.min(da,180-da);float mx=(line.x1+line.x2)*.5f,my=(line.y1+line.y2)*.5f;if(da<7&&old.distance(mx,my)<radius*.55f){duplicate=true;break;}}
-            if(!duplicate)found.add(line);if(found.size()>=12)break;
+            if(!duplicate)found.add(line);if(found.size()>=20)break;
         }
         found.sort(Comparator.comparingDouble((Line l)->l.score).reversed());return found;
     }
@@ -110,7 +110,7 @@ public final class FrameAnalyzer {
         float inDx=cueAtFirst?(incoming.x2-incoming.x1):(incoming.x1-incoming.x2),inDy=cueAtFirst?(incoming.y2-incoming.y1):(incoming.y1-incoming.y2),inMag=(float)Math.hypot(inDx,inDy);
         List<GuideRay> candidates=new ArrayList<>();
         for(Line l:lines){
-            if(l==incoming)continue;float d1=(float)Math.hypot(l.x1-gx,l.y1-gy),d2=(float)Math.hypot(l.x2-gx,l.y2-gy),near=Math.min(d1,d2);if(near>s.radius*6.2f)continue;
+            if(l==incoming)continue;float d1=(float)Math.hypot(l.x1-gx,l.y1-gy),d2=(float)Math.hypot(l.x2-gx,l.y2-gy),near=Math.min(d1,d2);if(near>s.radius*8f)continue;
             float sx,sy,dx,dy;if(d1<=d2){sx=l.x2;sy=l.y2;dx=l.x2-l.x1;dy=l.y2-l.y1;}else{sx=l.x1;sy=l.y1;dx=l.x1-l.x2;dy=l.y1-l.y2;}
             float mag=(float)Math.hypot(dx,dy);if(mag<1)continue;dx/=mag;dy/=mag;float dot=Math.abs((dx*inDx+dy*inDy)/Math.max(1f,inMag));if(dot>.985f)continue;
             candidates.add(new GuideRay(sx,sy,dx,dy,Math.min(1f,.45f+l.length/(s.right-s.left))));
