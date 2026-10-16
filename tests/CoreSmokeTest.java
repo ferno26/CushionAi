@@ -36,10 +36,10 @@ public class CoreSmokeTest {
   check(synthetic.rays.size()==2,"expected two synthetic guide branches, got "+synthetic.rays.size());
   if(args.length>=2){
    FrameAnalyzer.Scene first=analyzeFile(args[0]),second=analyzeFile(args[1]);
+   System.out.println("fixtures: first="+first.rays.size()+" second="+second.rays.size()+" bounds2="+second.left+","+second.top+"-"+second.right+","+second.bottom);
    check(first.confidence>.3f&&second.confidence>.3f,"screenshot table detection failed");
    check(first.right<1536*.86f&&second.right<1536*.86f,"side tray was mistaken for table");
    check(!first.rays.isEmpty(),"screenshot 1 guide not detected");check(second.rays.size()>=2,"screenshot 2 two branches not detected");
-   System.out.println("fixtures: first="+first.rays.size()+" second="+second.rays.size()+" bounds2="+second.left+","+second.top+"-"+second.right+","+second.bottom);
   }
   System.out.println("PASS: reflections, collision, synthetic two-branch guide, screenshot regression");
  }
