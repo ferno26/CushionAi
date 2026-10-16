@@ -30,7 +30,15 @@ public final class Trajectory {
         float x=Math.max(left,Math.min(right,sx));
         float y=Math.max(top,Math.min(bottom,sy));
         result.points.add(new float[]{x,y});
-        for (int bounce=0;bounce<=maxRebounds && bounce<20;bounce++) {
+        // A detected native segment can already end on/outside a cushion. Begin with its
+        // reflected direction instead of producing an empty path at t=0.
+        if(maxRebounds>0){
+            boolean reflected=false;
+            if((x<=left+.05f&&dx<0)||(x>=right-.05f&&dx>0)){dx=-dx;reflected=true;}
+            if((y<=top+.05f&&dy<0)||(y>=bottom-.05f&&dy>0)){dy=-dy;reflected=true;}
+            if(reflected)result.rebounds=1;
+        }
+        for (int segment=0;segment<20;segment++) {
             float t=Float.POSITIVE_INFINITY;
             boolean flipX=false,flipY=false;
             if (dx>1e-5f) { float t1=(right-x)/dx; if(t1>=1e-4f && t1<t){ t=t1; flipX=true; flipY=false; } }
@@ -67,7 +75,7 @@ public final class Trajectory {
                 }
                 break;
             }
-            if(bounce==maxRebounds) break;
+            if(result.rebounds>=maxRebounds) break;
             x=endX;y=endY;
             if(flipX)dx=-dx;
             if(flipY)dy=-dy;

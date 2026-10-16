@@ -125,7 +125,7 @@ public final class CaptureService extends Service {
     }
     private void createCapture(int screenW,int screenH){
         captureWidth=screenW;captureHeight=screenH;
-        float scale=Math.min(1f,960f/Math.max(screenW,screenH));
+        float scale=Math.min(1f,1152f/Math.max(screenW,screenH));
         int w=Math.max(200,(int)(screenW*scale));int h=Math.max(120,(int)(screenH*scale));
         imageReader=ImageReader.newInstance(w,h,PixelFormat.RGBA_8888,2);
         installFrameListener(imageReader);
@@ -183,7 +183,7 @@ public final class CaptureService extends Service {
         imageReader=null;
         old.setOnImageAvailableListener(null,null);
         // Surface switch must happen before old ImageReader is closed.
-        float scale=Math.min(1f,960f/Math.max(width,height));
+        float scale=Math.min(1f,1152f/Math.max(width,height));
         int w=Math.max(200,(int)(width*scale));int h=Math.max(120,(int)(height*scale));
         ImageReader next=ImageReader.newInstance(w,h,PixelFormat.RGBA_8888,2);
         virtualDisplay.resize(w,h,getResources().getDisplayMetrics().densityDpi);

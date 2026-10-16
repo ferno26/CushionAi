@@ -45,10 +45,10 @@ public final class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(column);
         setContentView(scroll);
-        label("CUSHION LAB · AUTO GUIDE 4.1",22,0xFF7AFFB4);
-        label("8 Ball Pool — automatic screen capture + multi-cushion guideline",15,Color.WHITE);
+        label("CUSHION LAB · AUTO GUIDE 4.2",22,0xFF7AFFB4);
+        label("Extends the game's visible white guide lines with cushion rebounds",15,Color.WHITE);
         label("No root • No internet • A separate overlay, not a modified game",13,0xFFA6B6C7);
-        label("1  Allow display over other apps.\n2  Start capture and approve Android's screen-sharing dialog.\n3  Open 8 Ball Pool in landscape.\n4  Use these settings to adjust the prediction.",15,0xFFE0E8EA);
+        label("1  Allow display over other apps.\n2  Start capture and share the entire screen.\n3  Open the game in landscape and aim normally.\n4  The pale-white extensions appear from the game's guide lines.",15,0xFFE0E8EA);
         captureStatus=label(prefs.getString("capture_status","Capture is stopped"),14,0xFFFFD78E);
         label("A status strip should appear even if no table is found. If Android offers a choice, share the entire screen. If the strip is missing only over the game, the game or system may be hiding overlays.",13,0xFFCAD4DC);
         Button permission=button("1 · ALLOW OVERLAY PERMISSION");
@@ -61,6 +61,7 @@ public final class MainActivity extends Activity {
             if(!Settings.canDrawOverlays(this)){
                 label("Enable the overlay permission first, then return.",13,0xFFFFCC66);return;
             }
+            prefs.edit().putBoolean("manual_mode",false).apply();
             MediaProjectionManager manager=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
             Intent request;
             if(Build.VERSION.SDK_INT>=34){
@@ -73,44 +74,14 @@ public final class MainActivity extends Activity {
             Intent i=new Intent(this,CaptureService.class).setAction(CaptureService.ACTION_STOP);
             startService(i);
         });
-        label("MANUAL GUIDANCE",16,0xFF7AFFB4);
-        Switch manualSwitch=new Switch(this);
-        manualSwitch.setText("Use manually positioned table and cue ball");
-        manualSwitch.setTextColor(Color.WHITE);
-        manualSwitch.setChecked(prefs.getBoolean("manual_mode",false));
-        manualSwitch.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("manual_mode",checked).apply());
-        column.addView(manualSwitch);
-        label("If automatic detection finds nothing, enable this to draw a guide. Set the table edges, cue-ball position and Angle yourself. This mode does not track the game or other balls. Values use the current screen orientation; calibrate for landscape.",13,0xFFCAD4DC);
-        seek("manual_left",12,0,45,"% of screen",false);
-        seek("manual_top",15,0,45,"% of screen",false);
-        seek("manual_width",76,30,100,"% of screen",false);
-        seek("manual_height",70,25,100,"% of screen",false);
-        seek("cue_x",30,0,100,"% across table",false);
-        seek("cue_y",50,0,100,"% down table",false);
         label("WINDOW OPACITY",16,0xFF7AFFB4);
         seek("opacity",45,10,70,"%",false);
-        label("TABLE ALIGNMENT",16,0xFF7AFFB4);
-        label("Automatic detection stays active; these fine-tuning controls move/scale the displayed guide only.",13,0xFFCAD4DC);
-        seek("table_width",100,75,125,"%",false);
-        seek("table_height",100,75,125,"%",false);
-        seek("table_shift_x",100,0,200,"",false);
-        seek("table_shift_y",100,0,200,"",false);
         label("MAXIMUM CUSHION BOUNCES",16,0xFF7AFFB4);
-        seek("bounces",4,0,12,"",false);
-        label("SHOT DIRECTION",16,0xFF7AFFB4);
-        @SuppressWarnings("deprecation")
-        Switch autoSwitch=new Switch(this);
-        autoSwitch.setText("Automatically detect cue-stick direction");
-        autoSwitch.setTextColor(Color.WHITE);
-        autoSwitch.setChecked(prefs.getBoolean("auto_aim",true));
-        autoSwitch.setOnCheckedChangeListener((buttonView,checked)->prefs.edit().putBoolean("auto_aim",checked).apply());
-        column.addView(autoSwitch);
-        label("Fallback/manual angle (degrees). Used if cue-stick detection is uncertain.",13,0xFFCAD4DC);
-        seek("angle",0,0,359,"°",true);
+        seek("bounces",3,0,12,"",false);
         label("WHAT IT DOES",16,0xFF7AFFB4);
-        label("It looks for the felt, circular balls and cue stick in captured frames. The yellow line predicts cushion reflections. Cyan indicates estimated object-ball motion; dotted lines show pocket directions when a target is found.",14,Color.WHITE);
+        label("It finds the largest continuous felt area, reads up to two straight white guide branches already drawn by the game, and extends each branch using equal-angle cushion reflections. It does not draw table boxes, ball circles or pocket rays.",14,Color.WHITE);
         label("ACCURACY LIMITS",16,0xFFFFD78E);
-        label("Automatic computer vision here is experimental. Colored table skins, menus, animations, other overlays, spin and ball collisions may cause misdetections. It cannot read hidden game physics. Don't trust it as a guaranteed shot predictor.",13,0xFFE8C5A0);
+        label("The extensions are geometric estimates. Spin, cushion response, moving animation frames and partially hidden guide lines can still shift the real path. When no strong white guide is visible, the app intentionally draws nothing.",13,0xFFE8C5A0);
         label("Android 15 requires a fresh screen-capture approval each session. Screenshots stay in memory on your device; this app contains no network permission or analytics.",13,0xFFA6B6C7);
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
