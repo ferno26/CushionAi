@@ -53,7 +53,8 @@ public final class FrameAnalyzer {
     }
     private static void findTable(int[] p,int w,int h,float feltHue,Scene s){
         List<Integer> lefts=new ArrayList<>(),rights=new ArrayList<>(),ys=new ArrayList<>();
-        int step=Math.max(2,w/420),allowedGap=Math.max(2,w/300);
+        // Bridge balls and thin guide graphics inside a row, but not the wide gap to the side tray.
+        int step=Math.max(2,w/420),allowedGap=Math.max(8,w/35);
         for(int y=h/8;y<h*9/10;y+=step){
             int bestA=-1,bestB=-1,start=-1,last=-1,miss=0;
             for(int x=w/20;x<w*19/20;x+=step){
