@@ -3,52 +3,27 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  import-source:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      sha: ${{ steps.source.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Import attached Android source on first run
-        id: source
-        run: |
-          if [ ! -f app/build.gradle ]; then
-            unzip -q CushionLab-AutoGuide-Android15-source.zip -d "$RUNNER_TEMP/source"
-            cp -R "$RUNNER_TEMP/source/AutoGuideProject/app" .
-            cp -R "$RUNNER_TEMP/source/AutoGuideProject/tests" .
-            cp "$RUNNER_TEMP/source/AutoGuideProject/"*.gradle .
-            cp "$RUNNER_TEMP/source/AutoGuideProject/gradle.properties" .
-            cp "$RUNNER_TEMP/source/AutoGuideProject/.gitignore" .
-            cp "$RUNNER_TEMP/source/AutoGuideProject/README.md" .
-            cp "$RUNNER_TEMP/source/AutoGuideProject/REFERENCE-LICENSE.txt" .
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add app tests build.gradle settings.gradle gradle.properties .gitignore README.md REFERENCE-LICENSE.txt
-            git commit -m "Import complete Cushion Lab Android project"
-            git push origin HEAD:main
-          fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   apk:
-    needs: import-source
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.import-source.outputs.sha }}
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
