@@ -24,6 +24,16 @@ public final class MainActivity extends Activity {
     private static final int CAPTURE_REQUEST=701;
     private SharedPreferences prefs;
     private LinearLayout column;
+    private TextView captureStatus;
+    private final android.os.Handler statusHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable statusPoll=new Runnable(){
+        @Override public void run(){
+            if(captureStatus!=null)captureStatus.setText(prefs.getString("capture_status","Capture is stopped"));
+            statusHandler.postDelayed(this,1000);
+        }
+    };
+    @Override protected void onResume(){super.onResume();statusHandler.post(statusPoll);}
+    @Override protected void onPause(){statusHandler.removeCallbacks(statusPoll);super.onPause();}
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         prefs=getSharedPreferences("auto_guide",MODE_PRIVATE);
@@ -35,10 +45,12 @@ public final class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(column);
         setContentView(scroll);
-        label("CUSHION LAB · AUTO GUIDE",22,0xFF7AFFB4);
+        label("CUSHION LAB · AUTO GUIDE 4.1",22,0xFF7AFFB4);
         label("8 Ball Pool — automatic screen capture + multi-cushion guideline",15,Color.WHITE);
         label("No root • No internet • A separate overlay, not a modified game",13,0xFFA6B6C7);
         label("1  Allow display over other apps.\n2  Start capture and approve Android's screen-sharing dialog.\n3  Open 8 Ball Pool in landscape.\n4  Use these settings to adjust the prediction.",15,0xFFE0E8EA);
+        captureStatus=label(prefs.getString("capture_status","Capture is stopped"),14,0xFFFFD78E);
+        label("A status strip should appear even if no table is found. If Android offers a choice, share the entire screen. If the strip is missing only over the game, the game or system may be hiding overlays.",13,0xFFCAD4DC);
         Button permission=button("1 · ALLOW OVERLAY PERMISSION");
         permission.setOnClickListener(v->{
             Intent i=new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()));
@@ -61,6 +73,20 @@ public final class MainActivity extends Activity {
             Intent i=new Intent(this,CaptureService.class).setAction(CaptureService.ACTION_STOP);
             startService(i);
         });
+        label("MANUAL GUIDANCE",16,0xFF7AFFB4);
+        Switch manualSwitch=new Switch(this);
+        manualSwitch.setText("Use manually positioned table and cue ball");
+        manualSwitch.setTextColor(Color.WHITE);
+        manualSwitch.setChecked(prefs.getBoolean("manual_mode",false));
+        manualSwitch.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("manual_mode",checked).apply());
+        column.addView(manualSwitch);
+        label("If automatic detection finds nothing, enable this to draw a guide. Set the table edges, cue-ball position and Angle yourself. This mode does not track the game or other balls. Values use the current screen orientation; calibrate for landscape.",13,0xFFCAD4DC);
+        seek("manual_left",12,0,45,"% of screen",false);
+        seek("manual_top",15,0,45,"% of screen",false);
+        seek("manual_width",76,30,100,"% of screen",false);
+        seek("manual_height",70,25,100,"% of screen",false);
+        seek("cue_x",30,0,100,"% across table",false);
+        seek("cue_y",50,0,100,"% down table",false);
         label("WINDOW OPACITY",16,0xFF7AFFB4);
         seek("opacity",45,10,70,"%",false);
         label("TABLE ALIGNMENT",16,0xFF7AFFB4);
@@ -117,6 +143,12 @@ public final class MainActivity extends Activity {
         column.addView(bar);
     }
     private String pretty(String key){
+        if(key.equals("manual_left"))return "Table left";
+        if(key.equals("manual_top"))return "Table top";
+        if(key.equals("manual_width"))return "Manual table width";
+        if(key.equals("manual_height"))return "Manual table height";
+        if(key.equals("cue_x"))return "Cue-ball horizontal position";
+        if(key.equals("cue_y"))return "Cue-ball vertical position";
         if(key.equals("opacity"))return "Overlay opacity";
         if(key.equals("bounces"))return "Rebounds";
         if(key.equals("table_width"))return "Table width";

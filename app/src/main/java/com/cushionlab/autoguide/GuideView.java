@@ -17,18 +17,38 @@ final class GuideView extends View {
     private final SharedPreferences settings;
     private volatile FrameAnalyzer.Scene scene;
     private volatile int frameW,frameH;
+    private long lastFrameAt, lastStatusAt;
+    private int frames;
+    private final Runnable heartbeat=new Runnable(){
+        @Override public void run(){invalidate();postDelayed(this,1000);}
+    };
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();post(heartbeat);}
+    @Override protected void onDetachedFromWindow(){removeCallbacks(heartbeat);super.onDetachedFromWindow();}
     GuideView(Context ctx,SharedPreferences prefs){super(ctx);settings=prefs;setBackgroundColor(0x00000000);}
-    void submit(FrameAnalyzer.Scene result,int w,int h){scene=result;frameW=w;frameH=h;postInvalidate();}
+    void submit(FrameAnalyzer.Scene result,int w,int h){scene=result;frameW=w;frameH=h;lastFrameAt=android.os.SystemClock.elapsedRealtime();frames++;postInvalidate();}
     @Override protected void onDraw(Canvas c){
         super.onDraw(c);
         FrameAnalyzer.Scene s=scene;
-        if(s==null||s.confidence<.30f||frameW<1||frameH<1)return;
-        c.save(); c.scale(getWidth()/(float)frameW,getHeight()/(float)frameH);
+        boolean manual=settings.getBoolean("manual_mode",false);
+        boolean fresh=lastFrameAt>0 && android.os.SystemClock.elapsedRealtime()-lastFrameAt<5000;
+        String state=frames==0?"Waiting for screen frames":!fresh?"Capture paused - restart screen sharing":
+                s==null||s.confidence<.30f?"Frames OK - table not detected":
+                s.cue==null?"Table found - cue ball not detected":"Tracking table and cue ball";
+        String error=settings.getString("capture_error","");
+        if(!error.isEmpty())state=error;
+        drawStatus(c,(manual?"MANUAL GUIDE | ":"AUTO | ")+state+" | frames "+frames);
+        // Manual mode is an explicit calibration tool, never inferred game geometry.
+        int renderW=frameW,renderH=frameH;
+        if(manual){
+            renderW=Math.max(1,getWidth());renderH=Math.max(1,getHeight());
+            s=manualScene(renderW,renderH);
+        }else if(!fresh||s==null||s.confidence<.30f||frameW<1||frameH<1)return;
+        c.save(); c.scale(getWidth()/(float)renderW,getHeight()/(float)renderH);
         // Keep the full-screen capture coordinate space and apply only guide calibration.
         float zoomX=Math.max(.75f,Math.min(1.25f,settings.getInt("table_width",100)/100f));
         float zoomY=Math.max(.75f,Math.min(1.25f,settings.getInt("table_height",100)/100f));
-        float offsetX=(settings.getInt("table_shift_x",100)-100)*frameW/1000f;
-        float offsetY=(settings.getInt("table_shift_y",100)-100)*frameH/1000f;
+        float offsetX=(settings.getInt("table_shift_x",100)-100)*renderW/1000f;
+        float offsetY=(settings.getInt("table_shift_y",100)-100)*renderH/1000f;
         c.translate(offsetX,offsetY);
         c.scale(zoomX,zoomY,(s.left+s.right)*.5f,(s.top+s.bottom)*.5f);
         float r=s.radius;
@@ -50,7 +70,7 @@ final class GuideView extends View {
         }
         if(s.cue!=null){
             float dx,dy;
-            boolean auto=settings.getBoolean("auto_aim",true);
+            boolean auto=!manual&&settings.getBoolean("auto_aim",true);
             if(auto&&s.directionConfidence>.32f){dx=s.directionX;dy=s.directionY;}
             else {
                 float angle=settings.getInt("angle",0);
@@ -78,6 +98,31 @@ final class GuideView extends View {
             }
         }
         c.restore();
+    }
+    private FrameAnalyzer.Scene manualScene(int w,int h){
+        FrameAnalyzer.Scene s=new FrameAnalyzer.Scene();
+        s.left=w*settings.getInt("manual_left",12)/100f;
+        s.top=h*settings.getInt("manual_top",15)/100f;
+        s.right=Math.min(w-1,s.left+w*settings.getInt("manual_width",76)/100f);
+        s.bottom=Math.min(h-1,s.top+h*settings.getInt("manual_height",70)/100f);
+        s.radius=Math.max(2,Math.min(s.right-s.left,s.bottom-s.top)*.031f);
+        float x=s.left+s.radius+(s.right-s.left-2*s.radius)*settings.getInt("cue_x",30)/100f;
+        float y=s.top+s.radius+(s.bottom-s.top-2*s.radius)*settings.getInt("cue_y",50)/100f;
+        s.cue=new Trajectory.Ball(x,y,true,1);s.balls.add(s.cue);s.confidence=1;
+        return s;
+    }
+    private void drawStatus(Canvas c,String text){
+        float d=getResources().getDisplayMetrics().density;
+        p.setStyle(Paint.Style.FILL);p.setPathEffect(null);p.setTextSize(12*d);
+        float x=12*d,y=36*d;
+        p.setColor(0xEE101820);
+        c.drawRect(x-5*d,y-17*d,Math.min(getWidth()-8*d,x+p.measureText(text)+5*d),y+7*d,p);
+        p.setColor(0xFFFFFFFF);c.drawText(text,x,y,p);
+        long now=android.os.SystemClock.elapsedRealtime();
+        if(now-lastStatusAt>=1000){
+            lastStatusAt=now;
+            settings.edit().putString("capture_status",text).apply();
+        }
     }
     private void drawPath(Canvas c,List<float[]> pts){
         if(pts.size()<2)return;

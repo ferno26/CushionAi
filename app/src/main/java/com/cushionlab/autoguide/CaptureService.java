@@ -56,12 +56,13 @@ public final class CaptureService extends Service {
         if(Build.VERSION.SDK_INT>=33)captureData=intent.getParcelableExtra("captureData",Intent.class);
         else captureData=intent.getParcelableExtra("captureData");
         if(captureData==null){stopSelf();return START_NOT_STICKY;}
-        startNotification();
         prefs=getSharedPreferences("auto_guide",MODE_PRIVATE);
+        prefs.edit().putString("capture_error","").putString("capture_status","Starting screen capture...").apply();
         wm=(WindowManager)getSystemService(WINDOW_SERVICE);
         captureThread=new HandlerThread("local-frame-detector");captureThread.start();
         captureHandler=new Handler(captureThread.getLooper());
         try{
+            startNotification();
             MediaProjectionManager mgr=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
             projection=mgr.getMediaProjection(Activity.RESULT_OK,captureData);
             if(projection==null)throw new IllegalStateException("No MediaProjection");
@@ -78,7 +79,13 @@ public final class CaptureService extends Service {
             createOverlay();
             Point size=screenSize();
             createCapture(size.x,size.y);
-        }catch(Exception e){android.util.Log.e("CushionAutoGuide","Capture startup failed",e);stopSelf();}
+        }catch(Exception e){
+            android.util.Log.e("CushionAutoGuide","Capture startup failed",e);
+            String error="Capture failed: "+e.getClass().getSimpleName()+" - "+e.getMessage();
+            prefs.edit().putString("capture_error",error).putString("capture_status",error).apply();
+            android.widget.Toast.makeText(this,error,android.widget.Toast.LENGTH_LONG).show();
+            stopSelf();
+        }
         return START_NOT_STICKY;
     }
     private void startNotification(){
@@ -153,11 +160,15 @@ public final class CaptureService extends Service {
                         rgba[y*width+x]=0xff000000|(red<<16)|(green<<8)|blue;
                     }
                 }
+                prefs.edit().putString("capture_error","").apply();
                 FrameAnalyzer.Scene scene=FrameAnalyzer.analyze(rgba,width,height);
                 final int fw=width,fh=height;
                 mainHandler.post(()->{if(guide!=null){guide.submit(scene,fw,fh);updateOverlayOpacity();}
                     adjustCaptureSize();});
-            }catch(Exception ex){android.util.Log.w("CushionAutoGuide","Capture frame failed",ex);}
+            }catch(Exception ex){
+                android.util.Log.w("CushionAutoGuide","Capture frame failed",ex);
+                prefs.edit().putString("capture_error","Frame error: "+ex.getClass().getSimpleName()).apply();
+            }
             finally{if(im!=null)im.close();}
         },captureHandler);
     }
@@ -192,6 +203,8 @@ public final class CaptureService extends Service {
     }
     @Override public void onDestroy(){
         stopping=true;
+        if(prefs!=null && prefs.getString("capture_error","").isEmpty())
+            prefs.edit().putString("capture_status","Capture stopped - press Start and approve screen sharing").apply();
         // Disable callback first so our voluntary release does not trigger a second stop.
         if(projection!=null&&projectionCallback!=null)try{projection.unregisterCallback(projectionCallback);}catch(Exception ignored){}
         if(virtualDisplay!=null){virtualDisplay.release();virtualDisplay=null;}
