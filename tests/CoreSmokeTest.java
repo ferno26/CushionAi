@@ -27,6 +27,9 @@ public class CoreSmokeTest {
   }
   List<Trajectory.Ball> balls=new ArrayList<>();balls.add(new Trajectory.Ball(100,80,true,1));balls.add(new Trajectory.Ball(150,80,false,1));
   Trajectory.Path contact=Trajectory.trace(100,80,1,0,5,5,195,155,5,balls,3);check(contact.hitBall==1,"object collision not detected");
+  Trajectory.Path tuned=Trajectory.traceAdjusted(100,80,1,.2f,5,5,195,155,6,new ArrayList<>(),5,8f);
+  check(tuned.rebounds==5&&tuned.points.size()==7,"adjusted cushion path failed");
+  for(float[] q:tuned.points)check(q[0]>=4.98f&&q[0]<=195.02f&&q[1]>=4.98f&&q[1]<=155.02f,"adjusted path escaped table");
   int w=420,h=240;int[] pixels=new int[w*h];
   for(int y=0;y<h;y++)for(int x=0;x<w;x++)pixels[y*w+x]=(x>=40&&x<380&&y>=30&&y<210)?0xff187ea4:0xff141a23;
   disk(pixels,w,h,115,116,8,0xfff7f7f4);line(pixels,w,h,115,116,200,100,0xffffffff);
