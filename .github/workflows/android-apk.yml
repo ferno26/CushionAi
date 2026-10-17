@@ -1,46 +1,27 @@
-name: Build Fox Pool Trainer APK
+name: Build Android APK
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
-permissions:
-  contents: read
-concurrency:
-  group: trainer-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare fresh trainer source
-        run: unzip -oq fox-pool-trainer-source.zip -d .
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Install Android SDK
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-      - name: Test deterministic physics
-        run: sh tests/run.sh
-      - name: Assemble APK
+      - name: Run trajectory and detection tests
+        run: sh tests/run.sh && sh tests/run-real-screen.sh && sh tests/run-detection-controls.sh
+      - name: Assemble debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
-      - name: Verify and package
-        run: |
-          mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/Fox-Pool-Trainer.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/Fox-Pool-Trainer.apk
-          cd dist
-          sha256sum Fox-Pool-Trainer.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Fox-Pool-Trainer-APK
-          path: dist/
-          if-no-files-found: error
-          retention-days: 30
+          name: CushionAI-Android15-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
