@@ -1,14 +1,12 @@
-name: Build Android APK
+name: Build Fox Pool Trainer APK
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
-  pull_request:
-    branches: [main, master]
 permissions:
   contents: read
 concurrency:
-  group: android-${{ github.ref }}
+  group: trainer-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   apk:
@@ -16,34 +14,33 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare Ball Pool Guide 5.0 source
-        run: unzip -oq cushion-guide-v5.zip -d .
+      - name: Prepare fresh trainer source
+        run: unzip -oq fox-pool-trainer-source.zip -d .
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
       - name: Install Android SDK
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-      - name: Run core smoke tests
+      - name: Test deterministic physics
         run: sh tests/run.sh
-      - name: Assemble debug APK
+      - name: Assemble APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
-      - name: Verify signed APK and prepare download
+      - name: Verify and package
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/CushionLab-BallPool-Guide-v5.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/CushionLab-BallPool-Guide-v5.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/Fox-Pool-Trainer.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/Fox-Pool-Trainer.apk
           cd dist
-          sha256sum CushionLab-BallPool-Guide-v5.apk > SHA256SUMS.txt
+          sha256sum Fox-Pool-Trainer.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: CushionLab-BallPool-Guide-v5-APK
+          name: Fox-Pool-Trainer-APK
           path: dist/
           if-no-files-found: error
           retention-days: 30
