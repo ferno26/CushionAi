@@ -1,129 +1,229 @@
 package com.cushionlab.autoguide;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-/** Finds the table and the game's own bright aiming-guide segments. Pure Java for host tests. */
+/** Heuristic table/ball/cue-stick detector for captured screenshots; no SDK or network dependencies.
+ * This is NOT guaranteed to handle every table skin, obstructed cue, or camera/animation frame.
+ */
 public final class FrameAnalyzer {
-    public static final class GuideRay {
-        public final float x,y,dx,dy,confidence;
-        GuideRay(float x,float y,float dx,float dy,float confidence){this.x=x;this.y=y;this.dx=dx;this.dy=dy;this.confidence=confidence;}
-    }
     public static final class Scene {
-        public float left,top,right,bottom,radius,confidence;
-        public final List<GuideRay> rays=new ArrayList<>();
+        public float left,top,right,bottom;
+        public float radius;
+        public float confidence;
+        public float directionX=1,directionY=0,directionConfidence;
+        public final List<Trajectory.Ball> balls=new ArrayList<>();
+        public Trajectory.Ball cue;
     }
-    private static final class Point { final float x,y; Point(float x,float y){this.x=x;this.y=y;} }
-    private static final class Line {
-        float x1,y1,x2,y2,length,score,angle;
-        float distance(float x,float y){float dx=x2-x1,dy=y2-y1,m=Math.max(1f,length);return Math.abs((x-x1)*dy-(y-y1)*dx)/m;}
+    static float brightness(int color){
+        return (0.2126f*((color>>16)&255)+0.7152f*((color>>8)&255)+0.0722f*(color&255))/255f;
     }
-    static float brightness(int color){return (0.2126f*((color>>16)&255)+0.7152f*((color>>8)&255)+0.0722f*(color&255))/255f;}
-    static float saturation(int p){int r=(p>>16)&255,g=(p>>8)&255,b=p&255;int mx=Math.max(r,Math.max(g,b)),mn=Math.min(r,Math.min(g,b));return mx==0?0:(mx-mn)/(float)mx;}
-    static float hue(int p){
+    static float saturation(int p){
+        int r=(p>>16)&255,g=(p>>8)&255,b=p&255;
+        int mx=Math.max(r,Math.max(g,b)),mn=Math.min(r,Math.min(g,b));
+        return mx==0?0:(mx-mn)/(float)mx;
+    }
+    static float hue(int p) {
         float r=((p>>16)&255)/255f,g=((p>>8)&255)/255f,b=(p&255)/255f;
-        float hi=Math.max(r,Math.max(g,b)),lo=Math.min(r,Math.min(g,b)),d=hi-lo;
-        if(d<.0001f)return 0;
-        float h=hi==r?((g-b)/d)%6:(hi==g?(b-r)/d+2:(r-g)/d+4);
+        float hi=Math.max(r,Math.max(g,b)),lo=Math.min(r,Math.min(g,b)),delta=hi-lo;
+        if(delta<0.0001f)return 0;
+        float h=hi==r?((g-b)/delta)%6:(hi==g?(b-r)/delta+2:(r-g)/delta+4);
         return (h*60+360)%360;
     }
-    private static float hueDistance(float a,float b){float d=Math.abs(a-b);return Math.min(d,360-d);}
-    static boolean felt(int p,float hue){float b=brightness(p);return saturation(p)>.24f&&b>.25f&&b<.94f&&hueDistance(hue(p),hue)<23f;}
-    private static boolean guideWhite(int p){
-        int r=(p>>16)&255,g=(p>>8)&255,b=p&255,hi=Math.max(r,Math.max(g,b)),lo=Math.min(r,Math.min(g,b));
-        return lo>=165&&hi-lo<=50&&brightness(p)>.70f;
+    private static float distance(float a,float b){float d=Math.abs(a-b);return Math.min(d,360-d);}
+    static boolean felt(int pixel,float feltHue){
+        return saturation(pixel)>.23f && brightness(pixel)>.275f &&
+                brightness(pixel)<.96f && distance(hue(pixel),feltHue)<25f;
     }
-    public static Scene analyze(int[] pixels,int width,int height){
-        Scene scene=new Scene();
-        if(pixels==null||width<200||height<120||pixels.length<width*height)return scene;
-        float feltHue=dominantFeltHue(pixels,width,height);
-        findTable(pixels,width,height,feltHue,scene);
-        if(scene.confidence<.30f)return scene;
-        List<Point> whites=whitePoints(pixels,width,height,scene);
-        List<Line> lines=houghLines(whites,width,height,scene.radius);
-        chooseRays(pixels,width,height,scene,lines);
-        return scene;
+    private static int pix(int[] p,int w,int h,int x,int y){
+        x=Math.min(w-1,Math.max(0,x));y=Math.min(h-1,Math.max(0,y));return p[y*w+x];
     }
-    private static float dominantFeltHue(int[] p,int w,int h){
+    private static boolean neutralWhite(int px){
+        int r=(px>>16)&255,g=(px>>8)&255,b=px&255;
+        return r>175&&g>175&&b>175 && Math.max(r,Math.max(g,b))-Math.min(r,Math.min(g,b))<67;
+    }
+    public static Scene analyze(int[] rgb,int width,int height) {
+        Scene s=new Scene();
+        if(rgb==null||width<200||height<120||rgb.length<width*height)return s;
         int[] bins=new int[36];
-        for(int y=h/4;y<h*4/5;y+=5)for(int x=w/7;x<w*6/7;x+=5){int c=p[y*w+x];if(saturation(c)>.28f&&brightness(c)>.16f&&brightness(c)<.92f)bins[(int)(hue(c)/10)%36]++;}
-        int best=0;for(int i=1;i<36;i++)if(bins[i]>bins[best])best=i;return best*10+5;
-    }
-    private static void findTable(int[] p,int w,int h,float feltHue,Scene s){
-        List<Integer> lefts=new ArrayList<>(),rights=new ArrayList<>(),ys=new ArrayList<>();
-        // Bridge balls and thin guide graphics inside a row, but not the wide gap to the side tray.
-        int step=Math.max(2,w/420),allowedGap=Math.max(8,w/35);
-        for(int y=h/8;y<h*9/10;y+=step){
-            int bestA=-1,bestB=-1,start=-1,last=-1,miss=0;
-            for(int x=w/20;x<w*19/20;x+=step){
-                if(felt(p[y*w+x],feltHue)){if(start<0)start=x;last=x;miss=0;}
-                else if(start>=0){miss+=step;if(miss>allowedGap){if(last-start>bestB-bestA){bestA=start;bestB=last;}start=-1;last=-1;miss=0;}}
+        // The broad center excludes most game UI. Dominant saturated hue is usually the felt.
+        for(int y=height/4;y<height*3/4;y+=5)for(int x=width/5;x<width*4/5;x+=5){
+            int p=rgb[y*width+x];
+            if(saturation(p)>.28f&&brightness(p)>.15f&&brightness(p)<.93f)bins[(int)(hue(p)/10)%36]++;
+        }
+        int topBin=0;
+        for(int i=1;i<bins.length;i++)if(bins[i]>bins[topBin])topBin=i;
+        float feltHue=topBin*10+5;
+        int step=Math.max(3,width/190);
+        List<Integer> leftEdges=new ArrayList<>(),rightEdges=new ArrayList<>(),goodRows=new ArrayList<>();
+        int allowedGap=Math.max(10,Math.round(Math.min(width,height)*.029f));
+        for(int y=height/9;y<height*9/10;y+=step){
+            // Find a coherent felt run. A single same-colour UI pixel no longer
+            // expands the table bounds beyond the physical cushions.
+            int bestStart=-1,bestEnd=-1,start=-1,last=-1,gap=0;
+            for(int x=width/16;x<width*15/16;x+=step){
+                if(felt(rgb[y*width+x],feltHue)){
+                    if(start<0)start=x;
+                    last=x;gap=0;
+                }else if(start>=0){
+                    gap+=step;
+                    if(gap>allowedGap){
+                        if(last-start>bestEnd-bestStart){bestStart=start;bestEnd=last;}
+                        start=-1;last=-1;gap=0;
+                    }
+                }
             }
-            if(start>=0&&last-start>bestB-bestA){bestA=start;bestB=last;}
-            if(bestA>=0&&bestB-bestA>w*.42f){lefts.add(bestA);rights.add(bestB);ys.add(y);}
-        }
-        if(ys.size()<Math.max(12,h/(step*12)))return;
-        Collections.sort(lefts);Collections.sort(rights);
-        s.left=lefts.get(lefts.size()/2);s.right=rights.get(rights.size()/2);s.top=ys.get(0);s.bottom=ys.get(ys.size()-1);
-        if(s.right-s.left<w*.38f||s.bottom-s.top<h*.30f)return;
-        s.radius=Math.max(5f,Math.min((s.bottom-s.top)*.033f,(s.right-s.left)*.022f));
-        s.confidence=Math.min(1f,ys.size()*step/(h*.42f));
-    }
-    private static List<Point> whitePoints(int[] p,int w,int h,Scene s){
-        List<Point> out=new ArrayList<>();int inset=Math.max(2,Math.round(s.radius*.4f)),step=1;
-        for(int y=(int)s.top+inset;y<(int)s.bottom-inset;y+=step)for(int x=(int)s.left+inset;x<(int)s.right-inset;x+=step)if(guideWhite(p[y*w+x]))out.add(new Point(x,y));
-        return out;
-    }
-    private static List<Line> houghLines(List<Point> pts,int w,int h,float radius){
-        List<Line> found=new ArrayList<>();if(pts.size()<20)return found;
-        final int angles=90,binSize=3,diag=(int)Math.ceil(Math.hypot(w,h)),bins=diag*2/binSize+3;
-        int[][] votes=new int[angles][bins];float[] cs=new float[angles],sn=new float[angles];
-        for(int a=0;a<angles;a++){double rad=Math.toRadians(a*2);cs[a]=(float)Math.cos(rad);sn[a]=(float)Math.sin(rad);}
-        int stride=Math.max(1,pts.size()/9000);
-        for(int n=0;n<pts.size();n+=stride){Point q=pts.get(n);for(int a=0;a<angles;a++){int b=Math.round((-q.x*sn[a]+q.y*cs[a]+diag)/binSize);if(b>=0&&b<bins)votes[a][b]++;}}
-        int minVotes=Math.max(5,Math.round(radius*.45f/stride));List<int[]> peaks=new ArrayList<>();
-        for(int a=0;a<angles;a++)for(int b=1;b<bins-1;b++)if(votes[a][b]>=minVotes&&votes[a][b]>=votes[a][b-1]&&votes[a][b]>=votes[a][b+1])peaks.add(new int[]{a,b,votes[a][b]});
-        peaks.sort((u,v)->Integer.compare(v[2],u[2]));int limit=Math.min(120,peaks.size());
-        for(int k=0;k<limit;k++){
-            int a=peaks.get(k)[0],b=peaks.get(k)[1];float rho=b*binSize-diag;List<Float> ts=new ArrayList<>();
-            for(Point q:pts)if(Math.abs(-q.x*sn[a]+q.y*cs[a]-rho)<=2.5f)ts.add(q.x*cs[a]+q.y*sn[a]);
-            if(ts.size()<minVotes)continue;Collections.sort(ts);
-            float bestStart=0,bestEnd=0,start=ts.get(0),last=start;int count=1,bestCount=0;
-            for(int i=1;i<=ts.size();i++){
-                if(i<ts.size()&&ts.get(i)-last<=Math.max(7f,radius*.62f)){last=ts.get(i);count++;continue;}
-                if(last-start>bestEnd-bestStart){bestStart=start;bestEnd=last;bestCount=count;}
-                if(i<ts.size()){start=last=ts.get(i);count=1;}
+            if(start>=0&&last-start>bestEnd-bestStart){bestStart=start;bestEnd=last;}
+            if(bestStart>=0&&bestEnd-bestStart>width*.40f){
+                leftEdges.add(bestStart);rightEdges.add(bestEnd);goodRows.add(y);
             }
-            float len=bestEnd-bestStart;if(len<Math.max(12f,radius)||bestCount<Math.max(5,len*.08f))continue;
-            Line line=new Line();line.angle=a*2;line.x1=cs[a]*bestStart-sn[a]*rho;line.y1=sn[a]*bestStart+cs[a]*rho;line.x2=cs[a]*bestEnd-sn[a]*rho;line.y2=sn[a]*bestEnd+cs[a]*rho;line.length=len;line.score=len+bestCount*1.5f;
-            boolean duplicate=false;for(Line old:found){float da=Math.abs(old.angle-line.angle);da=Math.min(da,180-da);float mx=(line.x1+line.x2)*.5f,my=(line.y1+line.y2)*.5f;if(da<7&&old.distance(mx,my)<radius*.55f){duplicate=true;break;}}
-            if(!duplicate)found.add(line);if(found.size()>=20)break;
         }
-        found.sort(Comparator.comparingDouble((Line l)->l.score).reversed());return found;
-    }
-    private static void chooseRays(int[] px,int w,int h,Scene s,List<Line> lines){
-        if(lines.isEmpty())return;Line incoming=null;boolean cueAtFirst=true;float best=-1;
-        for(Line l:lines){float f1=whiteFill(px,w,h,l.x1,l.y1,s.radius*.78f),f2=whiteFill(px,w,h,l.x2,l.y2,s.radius*.78f),filled=Math.max(f1,f2),asym=Math.abs(f1-f2),score=l.length*(.65f+filled+asym*.4f);if(filled>.18f&&score>best){best=score;incoming=l;cueAtFirst=f1>=f2;}}
-        if(incoming==null)return;
-        float gx=cueAtFirst?incoming.x2:incoming.x1,gy=cueAtFirst?incoming.y2:incoming.y1;
-        float inDx=cueAtFirst?(incoming.x2-incoming.x1):(incoming.x1-incoming.x2),inDy=cueAtFirst?(incoming.y2-incoming.y1):(incoming.y1-incoming.y2),inMag=(float)Math.hypot(inDx,inDy);
-        List<GuideRay> candidates=new ArrayList<>();
-        for(Line l:lines){
-            if(l==incoming)continue;float d1=(float)Math.hypot(l.x1-gx,l.y1-gy),d2=(float)Math.hypot(l.x2-gx,l.y2-gy),near=Math.min(d1,d2);if(near>s.radius*8f)continue;
-            float sx,sy,dx,dy;if(d1<=d2){sx=l.x2;sy=l.y2;dx=l.x2-l.x1;dy=l.y2-l.y1;}else{sx=l.x1;sy=l.y1;dx=l.x1-l.x2;dy=l.y1-l.y2;}
-            float mag=(float)Math.hypot(dx,dy);if(mag<1)continue;dx/=mag;dy/=mag;float dot=Math.abs((dx*inDx+dy*inDy)/Math.max(1f,inMag));if(dot>.985f)continue;
-            candidates.add(new GuideRay(sx,sy,dx,dy,Math.min(1f,.45f+l.length/(s.right-s.left))));
+        if(goodRows.size()<Math.max(10,height/(step*12)))return s;
+        java.util.Collections.sort(leftEdges);java.util.Collections.sort(rightEdges);
+        s.left=leftEdges.get(leftEdges.size()/2);
+        s.right=rightEdges.get(rightEdges.size()/2);
+        s.top=goodRows.get(0);
+        s.bottom=goodRows.get(goodRows.size()-1);
+        if(s.right-s.left<width*.35f||s.bottom-s.top<height*.28f)return s;
+        // The coherent felt run includes the blue cushion lining; approximate
+        // the actual reflection rails by offsetting that lining inward.
+        float margin=Math.max(6f,Math.min(16f,(s.bottom-s.top)*.033f));
+        s.left+=margin;
+        s.right-=margin;
+        s.bottom+=margin;
+        int qualified=goodRows.size();
+        s.confidence=Math.min(1f,qualified*step/(height*.42f));
+        float h=s.bottom-s.top;
+        float r=Math.max(5f,Math.min(h*.031f,(s.right-s.left)*.021f));
+        s.radius=r;
+        // Score circular objects using center-to-ring contrast with felt.
+        List<Candidate> candidates=new ArrayList<>();
+        int stride=Math.max(3,Math.round(r*.26f));
+        for(int y=(int)(s.top+1.6f*r);y<(int)(s.bottom-1.6f*r);y+=stride){
+            for(int x=(int)(s.left+1.6f*r);x<(int)(s.right-1.6f*r);x+=stride){
+                int inner=0,white=0,outer=0;
+                for(int k=0;k<12;k++){
+                    double a=k*Math.PI/6d;
+                    int ip=pix(rgb,width,height,Math.round(x+(float)Math.cos(a)*r*.48f),Math.round(y+(float)Math.sin(a)*r*.48f));
+                    int op=pix(rgb,width,height,Math.round(x+(float)Math.cos(a)*r*1.35f),Math.round(y+(float)Math.sin(a)*r*1.35f));
+                    if(!felt(ip,feltHue))inner++;
+                    if(neutralWhite(ip))white++;
+                    if(felt(op,feltHue))outer++;
+                }
+                if(inner<7||outer<7)continue;
+                float score=(inner/12f)*.45f+(outer/12f)*.55f;
+                if(!felt(rgb[y*width+x],feltHue))score+=.06f;
+                if(score<.76f)continue;
+                // A cue shaft or painted targeting line produces a narrow dark stripe,
+                // while a real ball occupies a roughly circular disk. Check multiple
+                // radial rings to reject these line-shaped false positives.
+                float disk=circleCoverage(rgb,width,height,x,y,r,feltHue);
+                if(disk<.72f && !(disk>.51f && whiteDiskArea(rgb,width,height,x,y,r)>.28f))continue;
+                score=Math.min(1f,score*.7f+disk*.3f);
+                candidates.add(new Candidate(x,y,score,white/12f));
+            }
         }
-        candidates.sort((a,b)->Float.compare(b.confidence,a.confidence));
-        for(GuideRay r:candidates){boolean parallel=false;for(GuideRay old:s.rays)if(Math.abs(old.dx*r.dx+old.dy*r.dy)>.975f){parallel=true;break;}if(!parallel)s.rays.add(r);if(s.rays.size()==2)break;}
-        if(s.rays.isEmpty()&&inMag>1)s.rays.add(new GuideRay(gx,gy,inDx/inMag,inDy/inMag,.55f));
+        candidates.sort(Comparator.comparingDouble((Candidate c)->c.score).reversed());
+        List<Candidate> chosen=new ArrayList<>();
+        for(Candidate c:candidates){
+            boolean near=false;
+            for(Candidate o:chosen)if(Math.hypot(o.x-c.x,o.y-c.y)<r*1.25f){near=true;break;}
+            if(!near)chosen.add(c);
+            if(chosen.size()>=18)break;
+        }
+        Candidate bestCue=null;
+        float bestWhite=.42f;
+        for(Candidate c:chosen){
+            // A striped object ball may have a brilliant white central patch;
+            // sample the whole ball disk instead of a few thin rings.
+            float white=whiteDiskArea(rgb,width,height,c.x,c.y,r);
+
+            if(white>bestWhite){bestWhite=white;bestCue=c;}
+        }
+        for(Candidate c:chosen){
+            // A cue marker or illuminated cue shaft can look like a second ball.
+            // Discard impossible overlap with a confidently located cue ball.
+            if(bestCue!=null&&c!=bestCue&&Math.hypot(c.x-bestCue.x,c.y-bestCue.y)<r*2.25f)continue;
+            boolean cue=c==bestCue;
+            Trajectory.Ball ball=new Trajectory.Ball(c.x,c.y,cue,c.score);
+            s.balls.add(ball);
+            if(cue)s.cue=ball;
+        }
+        if(s.cue!=null)detectStick(rgb,width,height,feltHue,s);
+        return s;
     }
-    private static float whiteFill(int[] p,int w,int h,float cx,float cy,float radius){
-        int yes=0,all=0,step=Math.max(1,Math.round(radius/4));
-        for(int y=Math.round(cy-radius);y<=cy+radius;y+=step)for(int x=Math.round(cx-radius);x<=cx+radius;x+=step){if(x<0||x>=w||y<0||y>=h||Math.hypot(x-cx,y-cy)>radius)continue;all++;if(guideWhite(p[y*w+x]))yes++;}
-        return all==0?0:yes/(float)all;
+    private static float circleCoverage(int[] pixels,int w,int h,int x,int y,float r,float feltHue){
+        int inside=0,total=0;
+        for(float fraction:new float[]{.51f,.78f}){
+            for(int k=0;k<24;k++){
+                double a=k*Math.PI/12d;
+                int ix=Math.round(x+(float)Math.cos(a)*r*fraction);
+                int iy=Math.round(y+(float)Math.sin(a)*r*fraction);
+                if(!felt(pix(pixels,w,h,ix,iy),feltHue))inside++;
+                total++;
+            }
+        }
+        return inside/(float)total;
+    }
+    private static float whiteDisk(int[] pixels,int w,int h,int x,int y,float r){
+        int white=0,all=0;
+        for(float fraction:new float[]{.25f,.5f,.72f}){
+            for(int k=0;k<16;k++){
+                double a=k*Math.PI/8;
+                int px=pix(pixels,w,h,Math.round(x+(float)Math.cos(a)*r*fraction),
+                        Math.round(y+(float)Math.sin(a)*r*fraction));
+                if(neutralWhite(px))white++;
+                all++;
+            }
+        }
+        return white/(float)all;
+    }
+    private static float whiteDiskArea(int[] pixels,int w,int h,int x,int y,float r){
+        int all=0,white=0;
+        int rad=Math.max(5,Math.round(r*.86f));
+        for(int dy=-rad;dy<=rad;dy+=2)for(int dx=-rad;dx<=rad;dx+=2){
+            if(dx*dx+dy*dy>rad*rad)continue;
+            if(neutralWhite(pix(pixels,w,h,x+dx,y+dy)))white++;
+            all++;
+        }
+        return all==0?0:white/(float)all;
+    }
+    private static void detectStick(int[] px,int w,int h,float feltHue,Scene scene){
+        // Detect the GAME'S existing bright cue aiming guideline. It provides
+        // a more reliable forward angle than guessing from coloured cue sticks.
+        float r=scene.radius;int cx=Math.round(scene.cue.x),cy=Math.round(scene.cue.y);
+        float best=-1,runner=-1;
+        for(int deg=0;deg<360;deg+=2){
+            double a=Math.toRadians(deg);float dx=(float)Math.cos(a),dy=(float)Math.sin(a);
+            float score=0;int total=0,bright=0;
+            for(float distance=r*1.9f;distance<r*17f;distance+=3f){
+                int x=Math.round(cx+distance*dx),y=Math.round(cy+distance*dy);
+                if(x<scene.left+r||x>scene.right-r||y<scene.top+r||y>scene.bottom-r)break;
+                total++;
+                // A thin game line is only 2-3 px wide, allowing a 1px sampling tolerance.
+                boolean lit=false;
+                for(int off=-1;off<=1;off++){
+                    int sx=Math.round(x-off*dy),sy=Math.round(y+off*dx);
+                    if(neutralWhite(pix(px,w,h,sx,sy))){lit=true;break;}
+                }
+                if(lit){bright++;score+=1.0f;}
+            }
+            if(total<8)continue;
+            float ratio=score/total;
+            // Reject isolated bright pixels that are not a sustained line.
+            if(bright<7||ratio<.36f)continue;
+            if(ratio>best){best=ratio;runner=(float)a;}
+        }
+        if(best>.36f){
+            scene.directionX=(float)Math.cos(runner);
+            scene.directionY=(float)Math.sin(runner);
+            scene.directionConfidence=Math.min(1f,(best-.36f)/.52f);
+        }
+    }
+    private static class Candidate {
+        final int x,y; final float score,white;
+        Candidate(int x,int y,float score,float white){this.x=x;this.y=y;this.score=score;this.white=white;}
     }
     private FrameAnalyzer(){}
 }

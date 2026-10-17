@@ -24,16 +24,6 @@ public final class MainActivity extends Activity {
     private static final int CAPTURE_REQUEST=701;
     private SharedPreferences prefs;
     private LinearLayout column;
-    private TextView captureStatus;
-    private final android.os.Handler statusHandler=new android.os.Handler(android.os.Looper.getMainLooper());
-    private final Runnable statusPoll=new Runnable(){
-        @Override public void run(){
-            if(captureStatus!=null)captureStatus.setText(prefs.getString("capture_status","Capture is stopped"));
-            statusHandler.postDelayed(this,1000);
-        }
-    };
-    @Override protected void onResume(){super.onResume();statusHandler.post(statusPoll);}
-    @Override protected void onPause(){statusHandler.removeCallbacks(statusPoll);super.onPause();}
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         prefs=getSharedPreferences("auto_guide",MODE_PRIVATE);
@@ -45,12 +35,10 @@ public final class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(column);
         setContentView(scroll);
-        label("CUSHION LAB · AUTO GUIDE 4.3 TEST",22,0xFF7AFFB4);
-        label("Extends the game's visible white guide lines with cushion rebounds",15,Color.WHITE);
+        label("CUSHION AI · LIVE GUIDE",22,0xFF7AFFB4);
+        label("8 Ball Pool — automatic screen capture, three-line aim and cushion predictions",15,Color.WHITE);
         label("No root • No internet • A separate overlay, not a modified game",13,0xFFA6B6C7);
-        label("1  Allow display over other apps.\n2  Start capture and share the entire screen.\n3  Open the game in landscape and aim normally.\n4  The pale-white extensions appear from the game's guide lines.",15,0xFFE0E8EA);
-        captureStatus=label(prefs.getString("capture_status","Capture is stopped"),14,0xFFFFD78E);
-        label("A status strip should appear even if no table is found. If Android offers a choice, share the entire screen. If the strip is missing only over the game, the game or system may be hiding overlays.",13,0xFFCAD4DC);
+        label("1  Allow display over other apps.\n2  Start capture and approve Android's screen-sharing dialog.\n3  Open 8 Ball Pool in landscape.\n4  Use these settings to adjust the prediction.",15,0xFFE0E8EA);
         Button permission=button("1 · ALLOW OVERLAY PERMISSION");
         permission.setOnClickListener(v->{
             Intent i=new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()));
@@ -61,7 +49,6 @@ public final class MainActivity extends Activity {
             if(!Settings.canDrawOverlays(this)){
                 label("Enable the overlay permission first, then return.",13,0xFFFFCC66);return;
             }
-            prefs.edit().putBoolean("manual_mode",false).apply();
             MediaProjectionManager manager=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
             Intent request;
             if(Build.VERSION.SDK_INT>=34){
@@ -76,22 +63,33 @@ public final class MainActivity extends Activity {
         });
         label("WINDOW OPACITY",16,0xFF7AFFB4);
         seek("opacity",45,10,70,"%",false);
+        label("TABLE ALIGNMENT",16,0xFF7AFFB4);
+        label("Automatic detection stays active; these fine-tuning controls move/scale the displayed guide only.",13,0xFFCAD4DC);
+        seek("table_width",100,75,125,"%",false);
+        seek("table_height",100,75,125,"%",false);
+        seek("table_shift_x",100,0,200,"",false);
+        seek("table_shift_y",100,0,200,"",false);
         label("MAXIMUM CUSHION BOUNCES",16,0xFF7AFFB4);
-        seek("bounces",3,0,12,"",false);
-        label("VISUAL GUIDE TUNING",16,0xFF7AFFB4);
-        seek("guide_width",17,10,40,"%",false);
-        seek("rail_inset",100,50,160,"%",false);
-        signedSeek("cushion_bias",0,-20,20,"° per bounce");
-        signedSeek("spin_estimate",0,-10,10," visual estimate");
-        Switch debugSwitch=new Switch(this);
-        debugSwitch.setText("Show detector debug overlay");debugSwitch.setTextColor(Color.WHITE);
-        debugSwitch.setChecked(prefs.getBoolean("debug_overlay",true));
-        debugSwitch.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("debug_overlay",checked).apply());
-        column.addView(debugSwitch);
+        seek("bounces",4,0,12,"",false);
+        label("SHOT VISUALIZATION",16,0xFF7AFFB4);
+        toggle("three_lines", "Three targeting lines (center + edge guides)",true);
+        seek("guide_width",65,0,100,"%",false);
+        toggle("pocket_guides", "Highlight straight pocket lanes",true);
+        toggle("object_path", "Show estimated object-ball path",true);
+        label("SHOT DIRECTION",16,0xFF7AFFB4);
+        @SuppressWarnings("deprecation")
+        Switch autoSwitch=new Switch(this);
+        autoSwitch.setText("Automatically detect cue-stick direction");
+        autoSwitch.setTextColor(Color.WHITE);
+        autoSwitch.setChecked(prefs.getBoolean("auto_aim",true));
+        autoSwitch.setOnCheckedChangeListener((buttonView,checked)->prefs.edit().putBoolean("auto_aim",checked).apply());
+        column.addView(autoSwitch);
+        label("Fallback/manual angle (degrees). Used if cue-stick detection is uncertain.",13,0xFFCAD4DC);
+        seek("angle",0,0,359,"°",true);
         label("WHAT IT DOES",16,0xFF7AFFB4);
-        label("It reads up to two white guide branches and extends them. Cushion bias changes the reflected angle; Spin estimate adds a visual correction after each cushion. Debug mode shows the detected table and ray starts.",14,Color.WHITE);
+        label("It looks for felt, balls and a cue direction in captured frames. Yellow is the predicted centre ray, white the two edge guides, cyan the object-ball path, green dotted lines are clear pocket directions, and grey ones are blocked. These are approximations.",14,Color.WHITE);
         label("ACCURACY LIMITS",16,0xFFFFD78E);
-        label("The extensions are geometric estimates. Spin, cushion response, moving animation frames and partially hidden guide lines can still shift the real path. When no strong white guide is visible, the app intentionally draws nothing.",13,0xFFE8C5A0);
+        label("Automatic computer vision here is experimental. Colored table skins, menus, animations, other overlays, spin and ball collisions may cause misdetections. It cannot read hidden game physics. Don't trust it as a guaranteed shot predictor.",13,0xFFE8C5A0);
         label("Android 15 requires a fresh screen-capture approval each session. Screenshots stay in memory on your device; this app contains no network permission or analytics.",13,0xFFA6B6C7);
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
@@ -105,6 +103,13 @@ public final class MainActivity extends Activity {
         } else if(requestCode==CAPTURE_REQUEST){
             label("Screen capture denied. No overlay started.",14,0xFFFFCC66);
         }
+    }
+    private void toggle(String key,String title,boolean def){
+        @SuppressWarnings("deprecation") Switch control=new Switch(this);
+        control.setText(title);control.setTextColor(Color.WHITE);
+        control.setChecked(prefs.getBoolean(key,def));
+        control.setOnCheckedChangeListener((buttonView,checked)->prefs.edit().putBoolean(key,checked).apply());
+        column.addView(control);
     }
     private void seek(String key,int def,int min,int max,String unit,boolean manual){
         TextView value=label("",14,Color.WHITE);
@@ -123,20 +128,10 @@ public final class MainActivity extends Activity {
         });
         column.addView(bar);
     }
-    private void signedSeek(String key,int def,int min,int max,String unit){seek(key,def,min,max,unit,false);}
     private String pretty(String key){
-        if(key.equals("manual_left"))return "Table left";
-        if(key.equals("manual_top"))return "Table top";
-        if(key.equals("manual_width"))return "Manual table width";
-        if(key.equals("manual_height"))return "Manual table height";
-        if(key.equals("cue_x"))return "Cue-ball horizontal position";
-        if(key.equals("cue_y"))return "Cue-ball vertical position";
         if(key.equals("opacity"))return "Overlay opacity";
         if(key.equals("bounces"))return "Rebounds";
-        if(key.equals("guide_width"))return "Guide thickness";
-        if(key.equals("rail_inset"))return "Cushion contact inset";
-        if(key.equals("cushion_bias"))return "Cushion angle bias";
-        if(key.equals("spin_estimate"))return "Spin compensation";
+        if(key.equals("guide_width"))return "Guide corridor width";
         if(key.equals("table_width"))return "Table width";
         if(key.equals("table_height"))return "Table height";
         if(key.equals("table_shift_x"))return "Horizontal shift (100=center)";

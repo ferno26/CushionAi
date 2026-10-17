@@ -23,13 +23,6 @@ public final class Trajectory {
     public static Path trace(float sx,float sy,float dx,float dy,
                              float left,float top,float right,float bottom,
                              float radius,List<Ball> balls,int maxRebounds) {
-        return traceAdjusted(sx,sy,dx,dy,left,top,right,bottom,radius,balls,maxRebounds,0f);
-    }
-
-    /** Reflection preview with an optional per-cushion angle adjustment for visual calibration. */
-    public static Path traceAdjusted(float sx,float sy,float dx,float dy,
-                             float left,float top,float right,float bottom,
-                             float radius,List<Ball> balls,int maxRebounds,float angleAdjustmentDegrees) {
         Path result=new Path();
         float mag=(float)Math.hypot(dx,dy);
         if (mag<1.0e-5f || right<=left || bottom<=top) return result;
@@ -37,22 +30,14 @@ public final class Trajectory {
         float x=Math.max(left,Math.min(right,sx));
         float y=Math.max(top,Math.min(bottom,sy));
         result.points.add(new float[]{x,y});
-        // A detected native segment can already end on/outside a cushion. Begin with its
-        // reflected direction instead of producing an empty path at t=0.
-        if(maxRebounds>0){
-            boolean reflected=false;
-            if((x<=left+.05f&&dx<0)||(x>=right-.05f&&dx>0)){dx=-dx;reflected=true;}
-            if((y<=top+.05f&&dy<0)||(y>=bottom-.05f&&dy>0)){dy=-dy;reflected=true;}
-            if(reflected)result.rebounds=1;
-        }
-        for (int segment=0;segment<20;segment++) {
+        for (int bounce=0;bounce<=maxRebounds && bounce<20;bounce++) {
             float t=Float.POSITIVE_INFINITY;
             boolean flipX=false,flipY=false;
             if (dx>1e-5f) { float t1=(right-x)/dx; if(t1>=1e-4f && t1<t){ t=t1; flipX=true; flipY=false; } }
             if (dx<-1e-5f){ float t1=(left-x)/dx; if(t1>=1e-4f && t1<t){ t=t1; flipX=true; flipY=false; } }
             if (dy>1e-5f) { float t1=(bottom-y)/dy; if(t1>=1e-4f && t1<t){ t=t1; flipY=true; flipX=false; } }
             if (dy<-1e-5f){ float t1=(top-y)/dy; if(t1>=1e-4f && t1<t){ t=t1; flipY=true; flipX=false; } }
-            if (!Float.isFinite(t)) break;
+            if (!Float.isFinite(t) || t<1e-4f) break;
             int which=-1;
             float hit=t;
             for(int i=0;i<balls.size();i++) {
@@ -82,7 +67,7 @@ public final class Trajectory {
                 }
                 break;
             }
-            if(result.rebounds>=maxRebounds) break;
+            if(bounce==maxRebounds) break;
             x=endX;y=endY;
             if(flipX)dx=-dx;
             if(flipY)dy=-dy;
@@ -92,12 +77,6 @@ public final class Trajectory {
             }
             if (Math.abs(y-top)<.01f || Math.abs(y-bottom)<.01f) {
                 if(!flipY && Math.abs(dy)>1e-5f)dy=-dy;
-            }
-            if(Math.abs(angleAdjustmentDegrees)>.01f){
-                double turn=Math.toRadians(Math.max(-25f,Math.min(25f,angleAdjustmentDegrees)));
-                float nextX=(float)(dx*Math.cos(turn)-dy*Math.sin(turn));
-                float nextY=(float)(dx*Math.sin(turn)+dy*Math.cos(turn));
-                dx=nextX;dy=nextY;
             }
             result.rebounds++;
         }

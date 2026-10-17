@@ -9,7 +9,6 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
-import android.graphics.ImageFormat;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
@@ -31,7 +30,6 @@ import java.nio.ByteBuffer;
 public final class CaptureService extends Service {
     public static final String ACTION_STOP="com.cushionlab.autoguide.STOP";
     private static final String CHANNEL="cushion_capture";
-    private final Object sessionLock=new Object();
     private final Handler mainHandler=new Handler(android.os.Looper.getMainLooper());
     private HandlerThread captureThread;
     private Handler captureHandler;
@@ -45,6 +43,7 @@ public final class CaptureService extends Service {
     private SharedPreferences prefs;
     private int captureWidth,captureHeight;
     private long lastFrame;
+    private long lastResizeRequest;
     private volatile boolean stopping;
 
     @Override public IBinder onBind(Intent intent){return null;}
@@ -56,13 +55,12 @@ public final class CaptureService extends Service {
         if(Build.VERSION.SDK_INT>=33)captureData=intent.getParcelableExtra("captureData",Intent.class);
         else captureData=intent.getParcelableExtra("captureData");
         if(captureData==null){stopSelf();return START_NOT_STICKY;}
+        startNotification();
         prefs=getSharedPreferences("auto_guide",MODE_PRIVATE);
-        prefs.edit().putString("capture_error","").putString("capture_status","Starting screen capture...").apply();
         wm=(WindowManager)getSystemService(WINDOW_SERVICE);
         captureThread=new HandlerThread("local-frame-detector");captureThread.start();
         captureHandler=new Handler(captureThread.getLooper());
         try{
-            startNotification();
             MediaProjectionManager mgr=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
             projection=mgr.getMediaProjection(Activity.RESULT_OK,captureData);
             if(projection==null)throw new IllegalStateException("No MediaProjection");
@@ -79,24 +77,18 @@ public final class CaptureService extends Service {
             createOverlay();
             Point size=screenSize();
             createCapture(size.x,size.y);
-        }catch(Exception e){
-            android.util.Log.e("CushionAutoGuide","Capture startup failed",e);
-            String error="Capture failed: "+e.getClass().getSimpleName()+" - "+e.getMessage();
-            prefs.edit().putString("capture_error",error).putString("capture_status",error).apply();
-            android.widget.Toast.makeText(this,error,android.widget.Toast.LENGTH_LONG).show();
-            stopSelf();
-        }
+        }catch(Exception e){android.util.Log.e("CushionAutoGuide","Capture startup failed",e);stopSelf();}
         return START_NOT_STICKY;
     }
     private void startNotification(){
         NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
-        nm.createNotificationChannel(new NotificationChannel(CHANNEL,"Cushion Lab capture",NotificationManager.IMPORTANCE_LOW));
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL,"Cushion AI capture",NotificationManager.IMPORTANCE_LOW));
         Intent stop=new Intent(this,CaptureService.class).setAction(ACTION_STOP);
         PendingIntent stopPi=PendingIntent.getService(this,10,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent openPi=PendingIntent.getActivity(this,1,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         Notification n=new Notification.Builder(this,CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentTitle("Cushion Lab — screen guidance active")
+                .setContentTitle("Cushion AI — screen guidance active")
                 .setContentText("Local capture and bounce prediction. Tap to adjust.")
                 .setContentIntent(openPi)
                 .setOngoing(true)
@@ -113,9 +105,7 @@ public final class CaptureService extends Service {
         guide=new GuideView(this,prefs);
         int flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 |WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                |WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                |WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                |WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                |WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
         overlayParams=new WindowManager.LayoutParams(-1,-1,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,flags,PixelFormat.TRANSLUCENT);
         overlayParams.gravity=Gravity.TOP|Gravity.START;
@@ -125,13 +115,13 @@ public final class CaptureService extends Service {
     }
     private void createCapture(int screenW,int screenH){
         captureWidth=screenW;captureHeight=screenH;
-        float scale=Math.min(1f,1152f/Math.max(screenW,screenH));
+        float scale=Math.min(1f,960f/Math.max(screenW,screenH));
         int w=Math.max(200,(int)(screenW*scale));int h=Math.max(120,(int)(screenH*scale));
         imageReader=ImageReader.newInstance(w,h,PixelFormat.RGBA_8888,2);
         installFrameListener(imageReader);
         if(virtualDisplay==null){
             int density=getResources().getDisplayMetrics().densityDpi;
-            virtualDisplay=projection.createVirtualDisplay("Cushion Lab local capture",w,h,density,
+            virtualDisplay=projection.createVirtualDisplay("Cushion AI local capture",w,h,density,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,imageReader.getSurface(),null,captureHandler);
         }else{
             virtualDisplay.resize(w,h,getResources().getDisplayMetrics().densityDpi);
@@ -160,15 +150,17 @@ public final class CaptureService extends Service {
                         rgba[y*width+x]=0xff000000|(red<<16)|(green<<8)|blue;
                     }
                 }
-                prefs.edit().putString("capture_error","").apply();
                 FrameAnalyzer.Scene scene=FrameAnalyzer.analyze(rgba,width,height);
                 final int fw=width,fh=height;
-                mainHandler.post(()->{if(guide!=null){guide.submit(scene,fw,fh);updateOverlayOpacity();}
-                    adjustCaptureSize();});
-            }catch(Exception ex){
-                android.util.Log.w("CushionAutoGuide","Capture frame failed",ex);
-                prefs.edit().putString("capture_error","Frame error: "+ex.getClass().getSimpleName()).apply();
-            }
+                mainHandler.post(()->{
+                    if(stopping)return;
+                    if(guide!=null){guide.submit(scene,fw,fh);updateOverlayOpacity();}
+                    // Android 14+ sends authoritative captured-content resize events.
+                    // Polling display dimensions on these devices can cause an endless
+                    // resize loop when the status/nav bars or a cutout affect content size.
+                    if(Build.VERSION.SDK_INT<34)adjustCaptureSize();
+                });
+            }catch(Exception ex){android.util.Log.w("CushionAutoGuide","Capture frame failed",ex);}
             finally{if(im!=null)im.close();}
         },captureHandler);
     }
@@ -179,11 +171,21 @@ public final class CaptureService extends Service {
     }
     private void resizeProjection(int width,int height){
         if(stopping||virtualDisplay==null||imageReader==null)return;
+        if(width==captureWidth && height==captureHeight)return;
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-lastResizeRequest<180){
+            // Never lose the final resize callback in a burst of rotation events.
+            mainHandler.postDelayed(()->{
+                if(!stopping)resizeProjection(width,height);
+            },200);
+            return;
+        }
+        lastResizeRequest=now;
         final ImageReader old=imageReader;
         imageReader=null;
         old.setOnImageAvailableListener(null,null);
         // Surface switch must happen before old ImageReader is closed.
-        float scale=Math.min(1f,1152f/Math.max(width,height));
+        float scale=Math.min(1f,960f/Math.max(width,height));
         int w=Math.max(200,(int)(width*scale));int h=Math.max(120,(int)(height*scale));
         ImageReader next=ImageReader.newInstance(w,h,PixelFormat.RGBA_8888,2);
         virtualDisplay.resize(w,h,getResources().getDisplayMetrics().densityDpi);
@@ -199,12 +201,12 @@ public final class CaptureService extends Service {
         float a=Math.max(.1f,Math.min(.7f,prefs.getInt("opacity",45)/100f));
         if(Math.abs(a-overlayParams.alpha)<.005f)return;
         overlayParams.alpha=a;
-        try{wm.updateViewLayout(guide,overlayParams);}catch(RuntimeException ignored){}
+        try{wm.updateViewLayout(guide,overlayParams);}catch(RuntimeException e){
+            android.util.Log.w("CushionAutoGuide","Could not update overlay opacity",e);
+        }
     }
     @Override public void onDestroy(){
         stopping=true;
-        if(prefs!=null && prefs.getString("capture_error","").isEmpty())
-            prefs.edit().putString("capture_status","Capture stopped - press Start and approve screen sharing").apply();
         // Disable callback first so our voluntary release does not trigger a second stop.
         if(projection!=null&&projectionCallback!=null)try{projection.unregisterCallback(projectionCallback);}catch(Exception ignored){}
         if(virtualDisplay!=null){virtualDisplay.release();virtualDisplay=null;}
