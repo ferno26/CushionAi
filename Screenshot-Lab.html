@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Cushion AI — Screenshot Lab</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif}*{box-sizing:border-box}
+body{margin:0;background:#0c121c;color:#eaf4ff}header{padding:14px 16px;border-bottom:1px solid #243246;display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:18px;margin:0;color:#87ffbb}small{color:#a9bed3}.tag{border:1px solid #457d65;border-radius:20px;padding:5px 9px;font-size:11px;color:#99ffc6;white-space:nowrap}
+main{max-width:1080px;margin:auto;padding:12px;display:grid;gap:12px}.panel{background:#131e2e;border:1px solid #29374d;border-radius:13px;padding:14px;overflow:hidden}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.full{grid-column:1/-1}
+label{display:block;font-size:12px;color:#bed5ec;margin-bottom:7px}.metric{float:right;font-variant-numeric:tabular-nums;color:#8dffbc}
+input[type=range]{width:100%;accent-color:#73ffc2}input[type=file]{width:100%;font-size:12px;color:#d5e7ee}
+button{background:#293f53;color:#f5faff;border:1px solid #486277;border-radius:9px;padding:10px;min-height:42px;font-weight:600;cursor:pointer}button.selected{background:#27654e;border-color:#7bffc2}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}canvas{width:100%;height:auto;display:block;touch-action:none;cursor:crosshair;border:1px solid #45546a;border-radius:8px}
+#canvasWrap{min-height:180px;display:flex;align-items:center;justify-content:center;background:#090f17;border-radius:8px;overflow:hidden}
+#legend{font-size:12px;color:#bad0df;line-height:1.6}.hint{font-size:12px;color:#9ab6cd;line-height:1.6}
+.status{padding:7px 9px;color:#ffe2a3;background:#3b3222;border-radius:8px;font-size:12px;margin-bottom:10px}
+@media(min-width:800px){main{grid-template-columns:1fr 300px}.preview{grid-column:1;grid-row:1/span 3}.tools{grid-column:2}}
+</style>
+</head>
+<body><header><h1>Cushion AI <span style="color:#b1c4d9;font-weight:400">/ Screenshot Lab</span></h1><span class="tag">OFFLINE • NO ROOT</span></header>
+<main>
+<section class="panel preview"><div class="status" id="status">Load a screenshot of the pool table to begin. This is a screenshot tool, not a live floating overlay.</div>
+<div id="canvasWrap"><canvas id="view" width="1280" height="720"></canvas></div>
+<p id="legend">Yellow: center guideline · White: edge guidelines · Cyan: object-ball direction · Green dotted: clear pocket lane · Grey dotted: blocked lane</p></section>
+<section class="panel tools"><label>Choose an 8 Ball Pool screenshot</label><input id="file" type="file" accept="image/*">
+<p class="hint">Saved images stay on your device. No image is uploaded anywhere.</p>
+<div class="actions"><button id="auto">Auto-locate table</button><button id="reset">Reset</button></div></section>
+<section class="panel tools"><label>Tap to position markers</label><div class="actions"><button data-pick="cue" class="selected">CUE</button><button data-pick="target">TARGET</button><button data-pick="tableTL">TABLE ↖</button><button data-pick="tableBR">TABLE ↘</button></div>
+<p class="hint">Pick a tool, then tap the picture. Drag the cue or target marker to fine-tune. You can also drag the direction handle.</p></section>
+<section class="panel tools controls">
+<div><label>Shot angle <span class="metric" id="angleVal">0°</span></label><input id="angle" type="range" min="0" max="359" step="1" value="0"></div>
+<div><label>Cushion bounces <span class="metric" id="bouncesVal">4</span></label><input id="bounces" type="range" min="0" max="12" value="4"></div>
+<div><label>Guide corridor <span class="metric" id="spreadVal">65%</span></label><input id="spread" type="range" min="0" max="100" value="65"></div>
+<div><label>Line opacity <span class="metric" id="opacityVal">85%</span></label><input id="opacity" type="range" min="10" max="100" value="85"></div>
+<div><label><input id="three" type="checkbox" checked> 3-line targeting</label><label><input id="pockets" type="checkbox" checked> Pocket clearance guides</label></div>
+<div class="hint">Predictions use ideal cushion reflection. They cannot guarantee live shots or model spin and power. Screenshot processing is local.</div>
+</section>
+</main><script>
+'use strict';
+const $=id=>document.getElementById(id),canvas=$('view'),ctx=canvas.getContext('2d'),status=$('status');
+const state={img:null,w:1280,h:720,table:[110,115,1170,605],cue:{x:420,y:390},target:{x:720,y:360},pick:'cue',active:null,angle:0,bounces:4,spread:.65,alpha:.85,three:true,pockets:true};
+const clamp=(v,l,r)=>Math.min(r,Math.max(l,v));
+function radius(){return Math.max(3,(state.table[3]-state.table[1])*.025)}
+function dist2(ax,ay,bx,by){return (ax-bx)**2+(ay-by)**2}
+function stroke(points,color,width,dash){if(points.length<2)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.lineJoin='round';ctx.setLineDash(dash||[]);ctx.beginPath();ctx.moveTo(...points[0]);for(let i=1;i<points.length;i++)ctx.lineTo(...points[i]);ctx.stroke();ctx.restore()}
+function reflect(sx,sy,dx,dy,n,ignoreTarget=false){let [l,t,r,b]=state.table,R=radius(),pts=[[sx,sy]];l+=R;t+=R;r-=R;b-=R;
+ let x=clamp(sx,l,r),y=clamp(sy,t,b),hit=false;let d=Math.hypot(dx,dy);dx/=d;dy/=d;
+ for(let k=0;k<=n;k++){let tx=dx>0?(r-x)/dx:dx<0?(l-x)/dx:Infinity,ty=dy>0?(b-y)/dy:dy<0?(t-y)/dy:Infinity;let tt=Math.min(tx,ty);if(!Number.isFinite(tt))break;
+  if(!ignoreTarget){let vx=x-state.target.x,vy=y-state.target.y,proj=vx*dx+vy*dy;let disc=proj*proj-(vx*vx+vy*vy-4*R*R);if(disc>=0){let tm=-proj-Math.sqrt(disc);if(tm>.001&&tm<tt){pts.push([x+tm*dx,y+tm*dy]);hit=true;break}}}
+  x=clamp(x+tt*dx,l,r);y=clamp(y+tt*dy,t,b);pts.push([x,y]);if(k===n)break;
+  if(Math.abs(tx-ty)<.0001){dx=-dx;dy=-dy}else if(tx<ty)dx=-dx;else dy=-dy;
+ }
+ return {points:pts,hit}}
+function clearPocket(x1,y1,x2,y2){const [cx,cy]=[state.cue.x,state.cue.y];let vx=x2-x1,vy=y2-y1,d=vx*vx+vy*vy;if(d<1e-4)return false;
+ let q=clamp(((cx-x1)*vx+(cy-y1)*vy)/d,0,1);return dist2(cx,cy,x1+q*vx,y1+q*vy)>(2*radius())**2;}
+function targetObjectLine(hit){let R=radius(),dx=state.target.x-hit[0],dy=state.target.y-hit[1],m=Math.hypot(dx,dy);if(m<.01)return[];return reflect(state.target.x,state.target.y,dx/m,dy/m,0,true).points}
+function draw(){if(canvas.width!==state.w)canvas.width=state.w;if(canvas.height!==state.h)canvas.height=state.h;let w=state.w,h=state.h,R=radius();ctx.clearRect(0,0,w,h);ctx.fillStyle='#0c1320';ctx.fillRect(0,0,w,h);
+ if(state.img)ctx.drawImage(state.img,0,0,w,h);else{ctx.fillStyle='#155f55';ctx.fillRect(...[state.table[0],state.table[1],state.table[2]-state.table[0],state.table[3]-state.table[1]])}
+ ctx.save();ctx.globalAlpha=state.alpha;
+ const [l,t,r,b]=state.table;stroke([[l,t],[r,t],[r,b],[l,b],[l,t]],'#61ff9f',Math.max(2,R*.17));
+ let holes=[[l,t],[(l+r)/2,t],[r,t],[l,b],[(l+r)/2,b],[r,b]];
+ for(let p of holes){ctx.beginPath();ctx.arc(...p,R*.58,0,Math.PI*2);ctx.fillStyle='#17211d';ctx.fill();ctx.strokeStyle='#6bffac';ctx.lineWidth=2;ctx.stroke()}
+ let ang=state.angle*Math.PI/180,dx=Math.cos(ang),dy=Math.sin(ang),cx=state.cue.x,cy=state.cue.y;
+ if(state.three){for(let mul of [-1,1]){let sx=clamp(cx+mul*(-dy)*R*state.spread,l+R,r-R),sy=clamp(cy+mul*dx*R*state.spread,t+R,b-R);
+  stroke(reflect(sx,sy,dx,dy,state.bounces,true).points,'rgba(224,245,255,.9)',Math.max(2,R*.13))}}
+ let ray=reflect(cx,cy,dx,dy,state.bounces,false);
+ stroke(ray.points,'#ffe15f',Math.max(3,R*.23));
+ if(ray.hit){stroke(targetObjectLine(ray.points.at(-1)),'#39edff',Math.max(2,R*.17))}
+ if(state.pockets){for(const p of holes){stroke([[state.target.x,state.target.y],p],clearPocket(state.target.x,state.target.y,...p)?'#6effa0':'#889ba8',Math.max(1,R*.11),[R*.4,R*.35])}}
+ for(let [point,color] of [[state.target,'#66f7ff'],[state.cue,'#ffffff']]){ctx.beginPath();ctx.arc(point.x,point.y,R,0,2*Math.PI);ctx.fillStyle='#0d222b';ctx.fill();ctx.strokeStyle=color;ctx.lineWidth=Math.max(2,R*.17);ctx.stroke()}
+ let reach=Math.max(R*4,30);let ex=clamp(cx+dx*reach,0,w),ey=clamp(cy+dy*reach,0,h);stroke([[cx,cy],[ex,ey]],'#ffd88c',Math.max(2,R*.15));ctx.beginPath();ctx.arc(ex,ey,R*.46,0,Math.PI*2);ctx.fillStyle='#ffd88c';ctx.fill();
+ ctx.restore();}
+function statusText(text){status.textContent=text}
+function locate(){if(!state.img){statusText('Choose a screenshot first.');return;}let iw=state.w,ih=state.h;
+ const tmp=document.createElement('canvas'),k=Math.min(1,1400/Math.max(iw,ih));tmp.width=Math.round(iw*k);tmp.height=Math.round(ih*k);let c=tmp.getContext('2d',{willReadFrequently:true});c.drawImage(state.img,0,0,tmp.width,tmp.height);
+ let w=tmp.width,h=tmp.height,rgba=c.getImageData(0,0,w,h).data,bins=new Int32Array(36);
+ function hsv(x,y){const pos=(y*w+x)*4,rr=rgba[pos]/255,gg=rgba[pos+1]/255,bb=rgba[pos+2]/255,max=Math.max(rr,gg,bb),min=Math.min(rr,gg,bb),delta=max-min,ss=max?delta/max:0;let hue=0;if(delta){hue=max===rr?((gg-bb)/delta)%6:max===gg?(bb-rr)/delta+2:(rr-gg)/delta+4;hue=(hue*60+360)%360}return[hue,ss,.2126*rr+.7152*gg+.0722*bb]}
+ for(let y=h*.25|0;y<h*.75;y+=3)for(let x=w*.2|0;x<w*.8;x+=3){const [hue,s,v]=hsv(x,y);if(s>.28&&v>.15&&v<.93)bins[Math.floor(hue/10)%36]++}
+ let top=0;for(let i=1;i<36;i++)if(bins[i]>bins[top])top=i;let baseHue=top*10+5;
+ function felt(x,y){const [hue,s,v]=hsv(x,y);let d=Math.abs(hue-baseHue);return Math.min(d,360-d)<25&&s>.23&&v>.275&&v<.96}
+ let loX=w,hiX=0,loY=h,hiY=0,qualified=0,step=Math.max(2,Math.round(w/180));
+ for(let y=h*.125|0;y<h*.90;y+=step){let cnt=0,first=w,last=0;for(let x=w/15|0;x<w*14/15;x+=step)if(felt(x,y)){cnt++;first=Math.min(first,x);last=Math.max(last,x)}
+  if(cnt<(w/step)*.27)continue;qualified++;loX=Math.min(loX,first);hiX=Math.max(hiX,last);loY=Math.min(loY,y);hiY=Math.max(hiY,y)}
+ if(qualified<8||hiX-loX<w*.33||hiY-loY<h*.28){statusText('Auto-locate is uncertain on this screenshot. Use TABLE ↖ and TABLE ↘ to calibrate manually.');return}
+ state.table=[loX/k,loY/k,hiX/k,hiY/k];state.cue={x:(loX+hiX)*.38/k,y:(loY+hiY)*.5/k};state.target={x:(loX+hiX)*.58/k,y:(loY+hiY)*.5/k};
+ // Candidate selection: favour round regions with felt outside, then identify their white interiors.
+ const rad=radius()*k, candidates=[],stride=Math.max(3,Math.round(rad*.26));
+ function pix(x,y){x=clamp(Math.round(x),0,w-1);y=clamp(Math.round(y),0,h-1);const i=(y*w+x)*4;return [rgba[i],rgba[i+1],rgba[i+2]]}
+ function neutral(rgb){return rgb[0]>175&&rgb[1]>175&&rgb[2]>175&&(Math.max(...rgb)-Math.min(...rgb))<67}
+ for(let y=Math.round(loY+rad*1.6);y<hiY-rad*1.6;y+=stride){for(let x=Math.round(loX+rad*1.6);x<hiX-rad*1.6;x+=stride){
+   let inner=0,outer=0;
+   for(let j=0;j<12;j++){const a=j*Math.PI/6,cs=Math.cos(a),sn=Math.sin(a),ix=Math.round(x+cs*rad*.48),iy=Math.round(y+sn*rad*.48),ox=Math.round(x+cs*rad*1.35),oy=Math.round(y+sn*rad*1.35);
+     if(!felt(ix,iy))inner++;if(felt(ox,oy))outer++;}
+   if(inner<7||outer<7)continue;
+   let score=inner/12*.45+outer/12*.55;if(!felt(x,y))score+=.06;
+   if(score>=.76)candidates.push({x,y,score});
+ }}
+ candidates.sort((a,b)=>b.score-a.score);
+ const chosen=[];for(const pt of candidates){if(chosen.every(q=>dist2(q.x,q.y,pt.x,pt.y)>(rad*1.25)**2))chosen.push(pt);if(chosen.length>=18)break;}
+ let best=.55,bestPt=null;
+ for(const pt of chosen){let hits=0,total=0;
+   for(let fraction of [.25,.5,.72])for(let j=0;j<16;j++){const a=j*Math.PI/8;if(neutral(pix(pt.x+Math.cos(a)*rad*fraction,pt.y+Math.sin(a)*rad*fraction)))hits++;total++;}
+   let white=hits/total;
+   if(white>best){best=white;bestPt=[pt.x,pt.y]}
+ }
+ if(bestPt&&best>.55){state.cue={x:bestPt[0]/k,y:bestPt[1]/k};statusText('Table and likely cue ball located. Check the markers and adjust angle manually; detection is approximate.')}else statusText('Table located. Tap the real cue ball to calibrate; it was not confidently detected.');
+ draw()}
+function imgLoaded(url){const img=new Image();img.onload=()=>{state.img=img;state.w=img.naturalWidth;state.h=img.naturalHeight;state.table=[state.w*.10,state.h*.20,state.w*.90,state.h*.80];state.cue={x:state.w*.40,y:state.h*.50};state.target={x:state.w*.62,y:state.h*.48};draw();locate()};img.src=url}
+$('file').addEventListener('change',e=>{let file=e.target.files[0];if(file){let url=URL.createObjectURL(file);imgLoaded(url)}});
+$('auto').onclick=locate;$('reset').onclick=()=>{state.img=null;state.w=1280;state.h=720;state.table=[110,115,1170,605];state.cue={x:420,y:390};state.target={x:720,y:360};statusText('Reset. Load a screenshot for automatic table recognition.');draw()};
+for(const btn of document.querySelectorAll('[data-pick]'))btn.onclick=()=>{state.pick=btn.dataset.pick;document.querySelectorAll('[data-pick]').forEach(x=>x.classList.toggle('selected',x===btn))};
+function canvasXY(e){const box=canvas.getBoundingClientRect();return{x:(e.clientX-box.left)*state.w/box.width,y:(e.clientY-box.top)*state.h/box.height}}
+canvas.addEventListener('pointerdown',e=>{let {x,y}=canvasXY(e),R=radius(),c=state.cue,t=state.target,dx=Math.cos(state.angle*Math.PI/180),dy=Math.sin(state.angle*Math.PI/180),hx=c.x+dx*Math.max(4*R,30),hy=c.y+dy*Math.max(4*R,30);
+ state.active=dist2(x,y,hx,hy)<(2*R)**2?'angle':dist2(x,y,c.x,c.y)<(2.0*R)**2?'cue':dist2(x,y,t.x,t.y)<(2*R)**2?'target':state.pick;canvas.setPointerCapture(e.pointerId);position(e)});
+canvas.addEventListener('pointermove',e=>{if(state.active)position(e)});function release(e){state.active=null;try{canvas.releasePointerCapture(e.pointerId)}catch(_){}}canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);
+function position(e){const {x,y}=canvasXY(e),v=state.active,R=radius(),[l,t,r,b]=state.table;
+ if(v==='cue')state.cue={x:clamp(x,l+R,r-R),y:clamp(y,t+R,b-R)};
+ else if(v==='target')state.target={x:clamp(x,l+R,r-R),y:clamp(y,t+R,b-R)};
+ else if(v==='tableTL'){state.table[0]=clamp(x,5,r-5*R);state.table[1]=clamp(y,5,b-5*R)}
+ else if(v==='tableBR'){state.table[2]=clamp(x,l+5*R,state.w-5);state.table[3]=clamp(y,t+5*R,state.h-5)}
+ else if(v==='angle'){state.angle=(Math.atan2(y-state.cue.y,x-state.cue.x)*180/Math.PI+360)%360;state.angle=Math.round(state.angle);$('angle').value=state.angle;$('angleVal').textContent=state.angle+'°'}draw()}
+for(let field of ['angle','bounces','spread','opacity'])$(field).addEventListener('input',()=>{let v=+$(field).value;state[field]=field==='spread'||field==='opacity'?v/100:v;$(field+'Val').textContent=v+(field==='spread'||field==='opacity'?'%':field==='angle'?'°':'');draw()});
+$('three').onchange=e=>{state.three=e.target.checked;draw()};$('pockets').onchange=e=>{state.pockets=e.target.checked;draw()};draw();
+</script></body></html>
