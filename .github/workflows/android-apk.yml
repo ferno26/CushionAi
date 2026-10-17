@@ -2,9 +2,9 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 permissions:
   contents: read
 concurrency:
@@ -12,19 +12,19 @@ concurrency:
   cancel-in-progress: true
 jobs:
   apk:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
+      - name: Prepare Ball Pool Guide 5.0 source
+        run: unzip -oq cushion-guide-v5.zip -d .
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-          log-accepted-android-sdk-licenses: false
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
       - name: Install Android SDK
@@ -36,13 +36,13 @@ jobs:
       - name: Verify signed APK and prepare download
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/CushionLab-AutoGuide.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/CushionLab-AutoGuide.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/CushionLab-BallPool-Guide-v5.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/CushionLab-BallPool-Guide-v5.apk
           cd dist
-          sha256sum CushionLab-AutoGuide.apk > SHA256SUMS.txt
+          sha256sum CushionLab-BallPool-Guide-v5.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: CushionLab-AutoGuide-APK
+          name: CushionLab-BallPool-Guide-v5-APK
           path: dist/
           if-no-files-found: error
           retention-days: 30
